@@ -981,13 +981,26 @@ startCanyonRide = function()
         Icon = "zap"
     })
 
-    -- 1. Спешиваемся с тренажера
+    -- 1. Спешиваемся если на тренажере
     if isPlayerOnMachine() then
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.08)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+        end)
         NetBridge.machineDismount("jump")
-        task.wait(0.4)
+        task.wait(0.5)
     end
 
-    -- 2. Экипируем верхового маунта (слот 2 в хотбаре)
+    -- 2. Спешиваемся с хаб-маунта если есть
+    pcall(function()
+        if LocalPlayer.Character and LocalPlayer.Character:GetAttribute("HubMountSpecies") then
+            NetBridge.equip(2, {slot = nil})
+            task.wait(0.4)
+        end
+    end)
+
+    -- 3. Экипируем верхового маунта (слот 2 в хотбаре)
     pcall(function()
         NetBridge.equip(2, {slot = 2})
     end)
@@ -1002,45 +1015,69 @@ startCanyonRide = function()
         return
     end
 
-    -- 3. Телепортируемся на рампу перед обрывом
-    hrp.CFrame = CFrame.lookAt(Vector3.new(41.38, 26, -215), Vector3.new(41.38, 26, -100))
-    task.wait(0.3)
+    -- 4. Телепортируемся на StartZonePad (рампа в начале каньона)
+    local startX = Track.CENTRE_X or 41.38
+    local startZ = Track.Z0 or -196.37
+    local spawnCF = CFrame.new(startX, 27, startZ + 15)
 
-    -- 4. Направляем камеру прямо в каньон (+Z)
-    workspace.CurrentCamera.CFrame = CFrame.lookAt(Vector3.new(41.38, 30, -225), Vector3.new(41.38, 26, -100))
+    -- Пробуем телепорт несколько раз (сервер иногда реджектит)
+    for attempt = 1, 3 do
+        hrp.CFrame = spawnCF
+        task.wait(0.35)
+        local newPos = hrp.Position
+        -- Если телепорт сработал (X близко к 41 и Z близко к старту)
+        if math.abs(newPos.X - startX) < 20 and newPos.Z > startZ - 50 then
+            break
+        end
+    end
 
-    -- 5. Бежим вперед к обрыву
+    -- 5. Направляем камеру вперед в каньон
+    pcall(function()
+        workspace.CurrentCamera.CFrame = CFrame.lookAt(
+            Vector3.new(startX, 30, startZ + 5),
+            Vector3.new(startX, 26, startZ + 200)
+        )
+    end)
+
+    -- 6. Бежим вперёд и прыгаем с рампы
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-    task.wait(0.7)
+    task.wait(0.8)
 
-    -- 6. Прыгаем с обрыва в каньон!
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-    task.wait(0.1)
+    task.wait(0.12)
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-
-    task.wait(1.2)
+    task.wait(0.6)
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
 
-    -- 7. Ожидаем подтверждения старта заезда
+    -- 7. Ожидаем начала заезда (riding = true)
+    BotState.RideStatus = "Ожидание старта заезда..."
+    safeSetDesc(pRideStatus, BotState.RideStatus)
+
     local waitStart = os.clock()
-    while os.clock() - waitStart < 4 do
+    while os.clock() - waitStart < 5 do
         task.wait(0.2)
         if NetBridge.state.ride and NetBridge.state.ride.riding then
             break
         end
     end
 
+    -- Если так и не запустился — выходим
+    if not (NetBridge.state.ride and NetBridge.state.ride.riding) then
+        BotState.IsRiding = false
+        BotState.RideStatus = "Не удалось начать заезд. Повтор через 60с."
+        safeSetDesc(pRideStatus, BotState.RideStatus)
+        return
+    end
+
     BotState.RideStatus = "Скачка в каньоне! Поиск мобов..."
     safeSetDesc(pRideStatus, BotState.RideStatus)
 
-    -- 8. Цикл скачки: бежим вперед через все локации, пока позволяет энергия!
-    local rideStartTime = os.clock()
-    local maxRideTime = 1200 -- До 20 минут активного заезда вместо искусственных 50 сек
+    -- 8. Главный цикл приручения
     local lastTamedSpec = nil
 
-    while isAlive() and (os.clock() - rideStartTime < maxRideTime) do
+    while isAlive() do
         local rState = NetBridge.state.ride
-        if not rState or not rState.riding or RideModule.state.phase == "idle" then
+        if not rState or not rState.riding then
             break
         end
 
@@ -1048,39 +1085,38 @@ startCanyonRide = function()
         local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
         if not currentHrp then break end
 
-        -- Текущие координаты, локация и динамический центр каньона
         local currentZ = currentHrp.Position.Z
         local myX = currentHrp.Position.X
-        local currentStage = nil
-        pcall(function()
-            if Track and Track.stageAt then
-                currentStage = Track.stageAt(currentZ)
-            end
-        end)
-        local zoneName = currentStage and currentStage.name or "Canyon"
-        local distanceM = math.max(0, math.floor(currentZ + 196))
 
-        local trackCenter = 41.38
+        -- Зона и дистанция
+        local zoneName = "Canyon"
         pcall(function()
-            if Track and Track.centreX then
-                trackCenter = Track.centreX(currentZ) or 41.38
-            end
+            local stage = Track.stageAt and Track.stageAt(currentZ)
+            if stage then zoneName = stage.name end
+        end)
+        local distanceM = math.max(0, math.floor(currentZ - startZ))
+
+        -- Центр трека
+        local trackCenter = startX
+        pcall(function()
+            trackCenter = Track.centreX(currentZ) or startX
         end)
         local diffCenter = trackCenter - myX
 
-        -- Текущая энергия игрока (Grip)
+        -- Энергия игрока
         local stats = NetBridge.stats()
         local playerGrip = stats and stats.grip or 0
 
-        -- Считываем ручной ввод игрока для свободного управления ("муваться")
+        -- Ручное управление игрока (A/D)
         local manualSteer = 0
         if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then
-            manualSteer = manualSteer - 1
+            manualSteer = -1
         end
         if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then
-            manualSteer = manualSteer + 1
+            manualSteer = 1
         end
 
+        -- Состояние приручения
         local tameMode = TameModule.state.mode
         local tameFrac = tonumber(TameModule.state.fraction) or 0
         local currentSpec = TameModule.state.specId or "Unknown"
@@ -1088,68 +1124,65 @@ startCanyonRide = function()
         local isAirborne = (RideModule.state.phase == "airborne")
         local isTamed = (tameMode == "tamed" or tameFrac >= 1.0)
 
-        -- ========== СОСТОЯНИЕ 1: В ПОЛЁТЕ (AIRBORNE) ==========
+        -- СОСТОЯНИЕ 1: В ПОЛЁТЕ
         if isAirborne then
-            BotState.RideStatus = string.format("[%s • %dm] Прыжок в воздухе...", zoneName, distanceM)
+            BotState.RideStatus = string.format("[%s • %dm] В полёте...", zoneName, distanceM)
             safeSetDesc(pRideStatus, BotState.RideStatus)
             safeSetDesc(pTameProgress, "В полёте к цели...")
             task.wait(0.12)
             continue
         end
 
-        -- ========== СОСТОЯНИЕ 2: ИДЁТ ПРИРУЧЕНИЕ (РОЗОВАЯ ШКАЛА ЗАПОЛНЯЕТСЯ) ==========
+        -- СОСТОЯНИЕ 2: ЗАПОЛНЕНИЕ ШКАЛЫ ПРИРУЧЕНИЯ
         if tameMode == "filling" and tameFrac < 1.0 then
             local percent = math.floor(tameFrac * 100)
             BotState.RideStatus = string.format("[%s • %dm] Приручение: %s 💖", zoneName, distanceM, tostring(currentSpec))
             safeSetDesc(pRideStatus, BotState.RideStatus)
-            safeSetDesc(pTameProgress, string.format("Розовая шкала: %d%% | Хватка: %s", percent, tostring(currentSpec)))
+            safeSetDesc(pTameProgress, string.format("Розовая шкала: %d%% (%s)", percent, tostring(currentSpec)))
 
-            -- Разрешаем игроку свободно рулить даже во время приручения!
             if manualSteer ~= 0 then
                 RideModule.state.steer = manualSteer
             else
-                -- Авто-подруливание по центру каньона
                 RideModule.state.steer = math.clamp(diffCenter / 15, -0.6, 0.6)
             end
-
-            -- Пока шкала заполняется, удерживаемся и НЕ прыгаем!
             RideModule.state.jumpWanted = false
             task.wait(0.15)
             continue
         end
 
-        -- ========== СОСТОЯНИЕ 3: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН! ==========
-        if isTamed and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
-            local currentSize = TameModule.state.size or "Normal"
-            local currentMut = TameModule.state.mutation or "None"
+        -- СОСТОЯНИЕ 3: ДИНОЗАВР ПРИРУЧЕН!
+        if isTamed and lastTamedSpec ~= currentSpec
+            and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
+            local currentSize = TameModule.state.size or TameModule.state.settledSize or "Normal"
+            local currentMut = TameModule.state.mutation or TameModule.state.settledMutation or "None"
             local isNew = not NetBridge.knows(currentSpec)
             lastTamedSpec = currentSpec
-            safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
 
-            local notifTitle = "Приручен! 🎉"
+            local notifTitle = isNew and "🎉 НОВЫЙ ВИД ОТКРЫТ!" or "Приручен! 💖"
             if currentMut ~= "None" and currentMut ~= "" then
-                notifTitle = "🌟 Приручен [" .. currentMut .. "]!"
+                notifTitle = "🌟 [" .. currentMut .. "] " .. tostring(currentSpec) .. "!"
             elseif currentSize == "Colossal" or currentSize == "Huge" or currentSize == "Giant" then
-                notifTitle = "👑 Приручен (" .. currentSize .. ")!"
+                notifTitle = "👑 (" .. currentSize .. ") " .. tostring(currentSpec) .. "!"
             end
 
+            safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН 100%%! 🎉 %s", tostring(currentSpec)))
             safeNotify({
                 Title = notifTitle,
-                Content = string.format("%s %s %s", tostring(currentSpec), currentMut ~= "None" and ("[" .. currentMut .. "]") or "", currentSize ~= "Normal" and ("(" .. currentSize .. ")") or ""),
-                Duration = 3,
+                Content = tostring(currentSpec) ..
+                    (currentMut ~= "None" and (" [" .. currentMut .. "]") or "") ..
+                    (currentSize ~= "Normal" and (" (" .. currentSize .. ")") or ""),
+                Duration = 4,
                 Icon = "heart"
             })
             checkAndClaimIndex()
             notifyWebhookTamed(currentSpec, isNew, currentSize, currentMut)
         end
 
-        -- ========== СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА ПО УРОВНЮ ЭНЕРГИИ И РЕДКОСТИ ==========
+        -- СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕЙ ЦЕЛИ
         local bestTarget = nil
         local bestDist = 180
         local bestScore = -1
-        local targetName = ""
-        local targetTags = ""
-        local targetIsUnindexed = false
+        local targetLabel = ""
 
         local herd = workspace:FindFirstChild("StampedeHerd")
         if herd then
@@ -1158,76 +1191,59 @@ startCanyonRide = function()
                 if dino:IsA("Model") and dino.PrimaryPart then
                     local dPos = dino.PrimaryPart.Position
                     local dz = dPos.Z - myPos.Z
-                    -- Берём только тех, кто впереди нас по каньону
-                    if dz > 3 and dz < 155 then
+
+                    -- Только те кто ВПЕРЕДИ нас
+                    if dz > 5 and dz < 160 then
                         local score, isSpecial, size, mut, reqGrip, espColor, isUnknown, specId = getDinoRarity(dino, playerGrip)
 
-                        -- ПРОВЕРКА ЭНЕРГИИ (GRIP GATE):
-                        -- Прыгаем ТОЛЬКО на тех, кого позволяет оседлать наша энергия!
+                        -- Только если энергии хватает
                         if reqGrip <= playerGrip then
                             local dist = (dPos - myPos).Magnitude
 
-                            -- Многоцветная неоновая подсветка (ESP) для редких, гигантов, мутаций и неизвестных
-                            if Config.DinoESP and isSpecial then
-                                local hl = dino:FindFirstChild("DinoRarityGlow")
-                                if not hl then
-                                    pcall(function()
-                                        local newHl = Instance.new("Highlight")
-                                        newHl.Name = "DinoRarityGlow"
-                                        newHl.FillColor = espColor
-                                        newHl.FillTransparency = 0.35
-                                        newHl.OutlineColor = Color3.fromRGB(255, 255, 255)
-                                        newHl.OutlineTransparency = 0.1
-                                        newHl.Adornee = dino
-                                        newHl.Parent = dino
-                                    end)
+                            -- ESP подсветка редких
+                            if Config.DinoESP and isSpecial and not dino:FindFirstChild("DinoRarityGlow") then
+                                pcall(function()
+                                    local hl = Instance.new("Highlight")
+                                    hl.Name = "DinoRarityGlow"
+                                    hl.FillColor = espColor
+                                    hl.FillTransparency = 0.35
+                                    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                                    hl.OutlineTransparency = 0.1
+                                    hl.Adornee = dino
+                                    hl.Parent = dino
+                                end)
+                            end
+
+                            -- Выбор цели
+                            local isBetter = false
+                            if not bestTarget then
+                                isBetter = true
+                            elseif Config.PrioritizeRare then
+                                -- Редкий приоритет: выбираем более редкого даже дальнего
+                                if score > bestScore * 1.15 then
+                                    isBetter = true
+                                elseif score >= bestScore * 0.85 and dist < bestDist then
+                                    isBetter = true
+                                end
+                            else
+                                -- Без приоритета редкости: HuntUnindexed и ближний
+                                if Config.HuntUnindexed and isUnknown and not (bestScore > 3000) then
+                                    isBetter = true
+                                elseif dist < bestDist then
+                                    isBetter = true
                                 end
                             end
 
-                            -- ВЫБОР ЦЕЛИ С УЧЕТОМ ПРИОРИТЕТА РЕДКОСТИ:
-                            if Config.PrioritizeRare then
-                                local isBetter = false
-                                if not bestTarget then
-                                    isBetter = true
-                                elseif score > bestScore * 1.15 then
-                                    -- Значительно более редкий вид/мутация/гигант -> выбираем его!
-                                    isBetter = true
-                                elseif score >= bestScore * 0.85 and dist < bestDist then
-                                    -- Примерно одинаковая редкость, но этот ближе -> выбираем более близкого
-                                    isBetter = true
-                                end
+                            if isBetter then
+                                bestTarget = dino
+                                bestDist = dist
+                                bestScore = score
 
-                                if isBetter then
-                                    bestTarget = dino
-                                    bestDist = dist
-                                    bestScore = score
-                                    targetName = dino.Name
-                                    targetIsUnindexed = isUnknown
-                                    local tagParts = {}
-                                    if mut ~= "None" and mut ~= "" then table.insert(tagParts, mut) end
-                                    if size ~= "Normal" and size ~= "" then table.insert(tagParts, size) end
-                                    if isUnknown then table.insert(tagParts, "NEW") end
-                                    targetTags = #tagParts > 0 and ("[" .. table.concat(tagParts, ", ") .. "]") or ""
-                                end
-                            else
-                                if Config.HuntUnindexed and isUnknown then
-                                    if not targetIsUnindexed or dist < bestDist then
-                                        bestTarget = dino
-                                        bestDist = dist
-                                        bestScore = score
-                                        targetName = dino.Name
-                                        targetTags = "[NEW]"
-                                        targetIsUnindexed = true
-                                    end
-                                elseif not targetIsUnindexed and Config.AutoLeap then
-                                    if dist < bestDist then
-                                        bestTarget = dino
-                                        bestDist = dist
-                                        bestScore = score
-                                        targetName = dino.Name
-                                        targetTags = ""
-                                    end
-                                end
+                                local tags = {}
+                                if mut ~= "None" and mut ~= "" then table.insert(tags, mut) end
+                                if size ~= "Normal" and size ~= "" then table.insert(tags, size) end
+                                if isUnknown then table.insert(tags, "NEW") end
+                                targetLabel = dino.Name .. (#tags > 0 and (" [" .. table.concat(tags, ",") .. "]") or "")
                             end
                         end
                     end
@@ -1239,24 +1255,23 @@ startCanyonRide = function()
             local targetPos = bestTarget.PrimaryPart.Position
             local diffX = targetPos.X - currentHrp.Position.X
 
-            -- Если игрок рулит сам, отдаем приоритет игроку, иначе подруливаем к цели
             if manualSteer ~= 0 then
                 RideModule.state.steer = manualSteer
             else
                 RideModule.state.steer = math.clamp(diffX / 12, -1, 1)
             end
 
-            local statusDesc = targetTags ~= "" and string.format("Цель: %s %s", targetName, targetTags) or ("Цель: " .. targetName)
-            BotState.RideStatus = string.format("[%s • %dm] %s (дист. %.0fm)", zoneName, distanceM, statusDesc, bestDist)
+            BotState.RideStatus = string.format("[%s • %dm] → %s (%.0fm)", zoneName, distanceM, targetLabel, bestDist)
             safeSetDesc(pRideStatus, BotState.RideStatus)
 
-            -- ЕСЛИ УЖЕ ПРИРУЧЕН -> МГНОВЕННО МЕНЯЕМ НА НОВОГО!
-            -- Иначе прыгаем при дистанции <= 75 или при сбросе (angryLeft <= 3.5)
+            -- Прыгаем: сразу если приручили, по дистанции или при сбросе
             local shouldJump = false
             if isTamed then
-                shouldJump = (bestDist <= 85) or (bestDist <= 120 and math.abs(diffX) <= 32)
+                shouldJump = bestDist <= 85 or (bestDist <= 115 and math.abs(diffX) <= 28)
             else
-                shouldJump = (bestDist <= 75 and math.abs(diffX) <= 22) or (angryLeft > 0 and angryLeft <= 3.5) or (tameMode == "warn")
+                shouldJump = (bestDist <= 72 and math.abs(diffX) <= 20)
+                    or (angryLeft > 0 and angryLeft <= 3.5)
+                    or tameMode == "warn"
             end
 
             if shouldJump then
@@ -1266,37 +1281,33 @@ startCanyonRide = function()
                     task.wait(0.06)
                     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
                 end)
-                task.wait(0.35)
+                task.wait(0.3)
             else
-                task.wait(0.12)
+                task.wait(0.1)
             end
         else
-            -- Целей впереди пока не найдено: держим идеальный динамический центр каньона
+            -- Нет целей — держим центр
             if manualSteer ~= 0 then
                 RideModule.state.steer = manualSteer
             else
                 RideModule.state.steer = math.clamp(diffCenter / 15, -0.6, 0.6)
             end
-
-            local baseDesc = isTamed and "Приручен! Скачем вперед в следующую локацию..." or string.format("Скачка на %s (сброс: %.0fs)", tostring(currentSpec), angryLeft)
+            local baseDesc = isTamed
+                and "Приручен! Скачем вперёд..."
+                or string.format("Едем: %s (%.0fs до сброса)", tostring(currentSpec), angryLeft)
             BotState.RideStatus = string.format("[%s • %dm] %s", zoneName, distanceM, baseDesc)
             safeSetDesc(pRideStatus, BotState.RideStatus)
             task.wait(0.15)
         end
     end
 
-    -- 9. Завершаем скачку и возвращаемся
-    BotState.RideStatus = "Возврат в хаб и сбор наград..."
+    -- Завершение заезда
+    BotState.RideStatus = "Возврат в хаб..."
     safeSetDesc(pRideStatus, BotState.RideStatus)
-    pcall(function()
-        NetBridge.rideEnd("done")
-    end)
+    pcall(function() NetBridge.rideEnd("done") end)
     task.wait(1.5)
 
-    -- Проверяем новые открытия в Индексе
     checkAndClaimIndex()
-
-    -- 10. Возвращаемся на тренажер
     task.wait(0.5)
     if Config.AutoTrain then
         teleportToStandAndMount()
@@ -1308,7 +1319,7 @@ startCanyonRide = function()
 
     safeNotify({
         Title = "Скачки 🦕",
-        Content = "Скачка завершена! Награды собраны, вернулись на тренажер.",
+        Content = "Заезд завершён! Вернулись в хаб.",
         Duration = 3,
         Icon = "check"
     })
