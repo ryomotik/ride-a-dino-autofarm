@@ -43,6 +43,8 @@ local NetBridge = require(ClientModules:WaitForChild("NetBridge"))
 local GearMachine = require(ClientModules:WaitForChild("GearMachine"))
 local AuraShopModule = require(ClientModules:WaitForChild("AuraShop"))
 local RideModule = require(ClientModules:WaitForChild("Ride"))
+local TameModule = require(ClientModules:WaitForChild("Ride"):WaitForChild("Tame"))
+local LeapModule = require(ClientModules:WaitForChild("Ride"):WaitForChild("Leap"))
 local IndexModule = require(ClientModules:WaitForChild("Index"))
 
 -- Очистка старых окон WindUI
@@ -692,6 +694,7 @@ secActions:Button({
 local secRide = TabRide:Section({ Title = "Автоскачки и Охота за Индексом", Opened = true })
 
 local pRideStatus = secRide:Paragraph({ Title = "Статус скачек", Desc = "В ожидании" })
+local pTameProgress = secRide:Paragraph({ Title = "Шкала приручения (Tame Bar)", Desc = "Ожидание заезда (0%)" })
 local pIndexCount = secRide:Paragraph({ Title = "Прогресс Индекса", Desc = "Загрузка..." })
 
 -- Функция скачки с поиском редких и неизвестных динозавров
@@ -760,8 +763,10 @@ local function startCanyonRide()
     BotState.RideStatus = "Скачка в каньоне! Поиск редких мобов..."
     pRideStatus:SetDesc(BotState.RideStatus)
 
-    -- 8. Цикл скачки (до 40 секунд)
-    local rideEndTime = os.clock() + 40
+    -- 8. Цикл скачки и умного приручения (до 50 секунд)
+    local rideEndTime = os.clock() + 50
+    local lastTamedSpec = nil
+
     while BotState.Running and os.clock() < rideEndTime do
         local rState = NetBridge.state.ride
         if not rState or not rState.riding or RideModule.state.phase == "idle" then
@@ -772,60 +777,128 @@ local function startCanyonRide()
         local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
         if not currentHrp then break end
 
-        -- Поиск неизвестных динозавров в стаде каньона
-        local unindexedTarget = nil
+        local tameMode = TameModule.state.mode
+        local tameFrac = tonumber(TameModule.state.fraction) or 0
+        local currentSpec = TameModule.state.specId or "Unknown"
+        local angryLeft = tonumber(TameModule.state.angryLeft) or 0
+        local isAirborne = (RideModule.state.phase == "airborne")
+
+        -- ========== СОСТОЯНИЕ 1: В ПОЛЁТЕ (AIRBORNE) ==========
+        if isAirborne then
+            BotState.RideStatus = "Прыжок в воздухе..."
+            pRideStatus:SetDesc(BotState.RideStatus)
+            pTameProgress:SetDesc("В полёте к цели...")
+            task.wait(0.15)
+            continue
+        end
+
+        -- ========== СОСТОЯНИЕ 2: ИДЁТ ПРИРУЧЕНИЕ (РОЗОВАЯ ШКАЛА) ==========
+        if tameMode == "filling" and tameFrac < 1.0 then
+            local percent = math.floor(tameFrac * 100)
+            BotState.RideStatus = string.format("Приручение: %s 💖", tostring(currentSpec))
+            pRideStatus:SetDesc(BotState.RideStatus)
+            pTameProgress:SetDesc(string.format("Розовая шкала: %d%% | Хватка: %s", percent, tostring(currentSpec)))
+
+            -- КРИТИЧЕСКИ ВАЖНО: Во время заполнения шкалы НЕ ПРЫГАЕМ! Удерживаемся на динозавре!
+            RideModule.state.steer = 0
+            RideModule.state.jumpWanted = false
+
+            task.wait(0.2)
+            continue
+        end
+
+        -- ========== СОСТОЯНИЕ 3: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН! ==========
+        if (tameMode == "tamed" or tameFrac >= 1.0) and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
+            lastTamedSpec = currentSpec
+            pTameProgress:SetDesc(string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
+            safeNotify({
+                Title = "Приручен! 🎉",
+                Content = "Новый вид: " .. tostring(currentSpec) .. " добавлен в коллекцию!",
+                Duration = 3,
+                Icon = "heart"
+            })
+            checkAndClaimIndex()
+        end
+
+        -- ========== СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА В КАНЬОНЕ ==========
+        local bestTarget = nil
+        local bestDist = 160
+        local targetIsUnindexed = false
+
         local herd = workspace:FindFirstChild("StampedeHerd")
-        if herd and Config.HuntUnindexed then
-            local closestDist = 130
+        if herd then
+            local myPos = currentHrp.Position
             for _, dino in ipairs(herd:GetChildren()) do
                 if dino:IsA("Model") and dino.PrimaryPart then
-                    local name = dino.Name
-                    local isUnknown = not NetBridge.knows(name)
-                    
-                    -- Glow ESP для динозавра
-                    if Config.DinoESP and isUnknown and not dino:FindFirstChild("IndexHuntGlow") then
-                        pcall(function()
-                            local hl = Instance.new("Highlight")
-                            hl.Name = "IndexHuntGlow"
-                            hl.FillColor = Color3.fromRGB(255, 215, 0)
-                            hl.FillTransparency = 0.4
-                            hl.OutlineColor = Color3.fromRGB(255, 255, 120)
-                            hl.Adornee = dino
-                            hl.Parent = dino
-                        end)
-                    end
+                    local dPos = dino.PrimaryPart.Position
+                    local dz = dPos.Z - myPos.Z
+                    -- Берём только тех, кто впереди нас по каньону
+                    if dz > 5 and dz < 140 then
+                        local dist = (dPos - myPos).Magnitude
+                        local name = dino.Name
+                        local isUnknown = not NetBridge.knows(name)
 
-                    local dist = (dino.PrimaryPart.Position - currentHrp.Position).Magnitude
-                    if isUnknown and dist < closestDist then
-                        closestDist = dist
-                        unindexedTarget = dino
+                        -- Золотая подсветка для ещё не открытых видов
+                        if Config.DinoESP and isUnknown and not dino:FindFirstChild("IndexHuntGlow") then
+                            pcall(function()
+                                local hl = Instance.new("Highlight")
+                                hl.Name = "IndexHuntGlow"
+                                hl.FillColor = Color3.fromRGB(255, 215, 0)
+                                hl.FillTransparency = 0.4
+                                hl.OutlineColor = Color3.fromRGB(255, 255, 120)
+                                hl.Adornee = dino
+                                hl.Parent = dino
+                            end)
+                        end
+
+                        if Config.HuntUnindexed and isUnknown then
+                            if not targetIsUnindexed or dist < bestDist then
+                                bestTarget = dino
+                                bestDist = dist
+                                targetIsUnindexed = true
+                            end
+                        elseif not targetIsUnindexed and Config.AutoLeap then
+                            if dist < bestDist then
+                                bestTarget = dino
+                                bestDist = dist
+                            end
+                        end
                     end
                 end
             end
         end
 
-        -- Рулим к не открытому в Индексе динозавру
-        if unindexedTarget and unindexedTarget.PrimaryPart then
-            local diffX = unindexedTarget.PrimaryPart.Position.X - currentHrp.Position.X
-            RideModule.state.steer = math.clamp(diffX / 15, -1, 1)
-            RideModule.state.jumpWanted = true
-            pcall(function()
-                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-                task.wait(0.05)
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-            end)
-        elseif Config.AutoLeap then
-            -- Стандартный прыжок на ближайшего динозавра
-            RideModule.state.jumpWanted = true
-            pcall(function()
-                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-                task.wait(0.05)
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-            end)
-            RideModule.state.steer = 0
-        end
+        if bestTarget and bestTarget.PrimaryPart then
+            local targetPos = bestTarget.PrimaryPart.Position
+            local diffX = targetPos.X - currentHrp.Position.X
 
-        task.wait(1.5)
+            -- Плавно подруливаем к выбранной цели
+            RideModule.state.steer = math.clamp(diffX / 14, -1, 1)
+
+            local statusDesc = targetIsUnindexed and ("🎯 Охота на НОВОГО: " .. bestTarget.Name) or ("Скачка: цель " .. bestTarget.Name)
+            BotState.RideStatus = string.format("%s (дист. %.0fm)", statusDesc, bestDist)
+            pRideStatus:SetDesc(BotState.RideStatus)
+
+            -- Прыгаем, если приблизились (< 75 studs) ИЛИ если текущий динозавр скоро сбросит (angryLeft < 3)
+            local shouldJump = (bestDist <= 75 and math.abs(diffX) <= 25) or (angryLeft > 0 and angryLeft <= 2.5) or (tameMode == "warn")
+            if shouldJump then
+                RideModule.state.jumpWanted = true
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+                    task.wait(0.08)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+                end)
+                task.wait(0.4)
+            else
+                task.wait(0.15)
+            end
+        else
+            -- Целей впереди нет, едем прямо
+            RideModule.state.steer = 0
+            BotState.RideStatus = string.format("Скачка на %s (сброс через %.0fs)", tostring(currentSpec), angryLeft)
+            pRideStatus:SetDesc(BotState.RideStatus)
+            task.wait(0.2)
+        end
     end
 
     -- 9. Завершаем скачку и возвращаемся
