@@ -88,7 +88,7 @@ local Config = {
     HuntUnindexed = true,     -- Охота на мобов, которых нет в Индексе
     AutoClaimIndex = true,    -- Сбор наград Индекса
     DinoESP = true,           -- Подсветка новых/редких динозавров
-    ChillVisuals = true,      -- Космическая неон-аура и шлейф
+    ChillVisuals = false,     -- Космическая неон-аура и шлейф (отключено по умолчанию)
     RideInterval = 120,       -- Интервал между скачками (сек)
     CheckInterval = 2,
 }
@@ -1006,9 +1006,11 @@ if typeof(STATE) == "table" and STATE.onCleanup then
     end)
 end
 
--- Включаем чил-ауру при старте
+-- Включаем чил-ауру при старте (если включено в конфиге)
 if Config.ChillVisuals then
     applyChillVisuals(true)
+else
+    applyChillVisuals(false)
 end
 
 -- ==================== ОСНОВНОЙ ЦИКЛ БОТА ====================
