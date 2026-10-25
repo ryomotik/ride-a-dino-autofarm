@@ -21,6 +21,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
@@ -88,6 +89,14 @@ local function safeNotify(options)
     end)
 end
 
+local function safeSetDesc(element, desc)
+    pcall(function()
+        if element and element.SetDesc then
+            element:SetDesc(desc)
+        end
+    end)
+end
+
 -- Конфигурация бота
 local Config = {
     AutoTrain = true,
@@ -104,7 +113,7 @@ local Config = {
     ChillVisuals = false,     -- Космическая неон-аура и шлейф (отключено по умолчанию)
     Theme = "🌸 Sakura Pink (Тянка 1)",
     BgTransparency = 0.35,
-    RideInterval = 120,       -- Интервал между скачками (сек)
+    RideInterval = 60,        -- Интервал между скачками (сек)
     CheckInterval = 2,
 }
 
@@ -117,6 +126,14 @@ local BotState = {
     LastRide = 0,
     RideStatus = "В ожидании",
 }
+
+local function isAlive()
+    if not BotState.Running then return false end
+    if typeof(STATE) == "table" and STATE.alive and not STATE.alive() then
+        return false
+    end
+    return true
+end
 
 -- ==================== ЧИЛ-ВИЗУАЛ: АУРА, ПАРТИКЛЫ И ШЛЕЙФ ====================
 local function applyChillVisuals(enable)
@@ -414,6 +431,92 @@ local function checkAndClaimIndex()
 end
 
 -- ==================== КАСТОМНЫЕ АНИМЕ ТЕМЫ И ФОНЫ ====================
+-- ==================== ЭКИПИРОВКА ЛУЧШЕГО (EQUIP BEST) ====================
+local function equipBest()
+    task.spawn(function()
+        pcall(function()
+            safeNotify({
+                Title = "Экипировка ⚡",
+                Content = "Установка лучшего снаряжения...",
+                Duration = 2,
+                Icon = "zap"
+            })
+
+            local stats = NetBridge.stats()
+            local dollars = stats and stats.dollars or 0
+            local auraOrder = {"lvl1", "lvl2", "lvl3", "lvl4", "lvl5", "lvl6", "lvl7", "lvl8", "lvl9", "lvl10", "lvl11", "lvl12"}
+            local auraState = NetBridge.state.aura
+            local owned = auraState and auraState.owned or {}
+
+            -- 1. Покупаем и экипируем лучшую доступную ауру
+            local bestAffordable = nil
+            for _, id in ipairs(auraOrder) do
+                local info = Training.Auras[id]
+                if info and not owned[id] and dollars >= info.price then
+                    bestAffordable = id
+                end
+            end
+
+            if bestAffordable then
+                local stand = getMyStand()
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    NetBridge.machineDismount("jump")
+                    task.wait(0.3)
+                    hrp.CFrame = CFrame.new(24.98, 26.5, -267.50)
+                    task.wait(1.0)
+                    NetBridge.auraAction("open")
+                    task.wait(0.3)
+                    NetBridge.auraAction("buy", bestAffordable)
+                    task.wait(0.3)
+                    NetBridge.auraAction("equip", bestAffordable)
+                    task.wait(0.3)
+                    if stand then
+                        hrp.CFrame = stand:GetPivot() * CFrame.new(0, 3, 0)
+                        task.wait(0.3)
+                    end
+                end
+            else
+                local highestOwned = nil
+                for _, id in ipairs(auraOrder) do
+                    if owned[id] then highestOwned = id end
+                end
+                if highestOwned and auraState.equipped ~= highestOwned then
+                    NetBridge.auraAction("equip", highestOwned)
+                end
+            end
+
+            -- 2. Покупаем следующий тир тренажера
+            local loadout = NetBridge.loadout()
+            local currentTier = loadout and loadout.tier or 1
+            local nextTierData = Gear.Tiers[currentTier + 1]
+            if nextTierData and dollars >= nextTierData.price then
+                NetBridge.buy(currentTier + 1)
+            end
+
+            -- 3. Прокачиваем загон при наличии средств
+            tryUpgradePen()
+
+            -- 4. Экипируем верхового маунта (слот 2 в хотбаре)
+            pcall(function()
+                NetBridge.equip(2, {slot = 2})
+            end)
+
+            -- 5. Телепорт на свой тренажер
+            task.wait(0.3)
+            teleportToStandAndMount()
+
+            safeNotify({
+                Title = "Готово! ✨",
+                Content = "Лучшая аура, тренажер и маунт экипированы!",
+                Duration = 3,
+                Icon = "check-circle"
+            })
+        end)
+    end)
+end
+
 local GITHUB_RAW_BASE = "https://raw.githubusercontent.com/ryomotik/ride-a-dino-autofarm/main/assets/"
 
 local function getCustomAssetSafe(fileName, url)
@@ -499,13 +602,13 @@ local function applyCustomTheme(themeKey, transparency)
     end)
 end
 
--- ==================== СОЗДАНИЕ ИНТЕРФЕЙСА WINDUI ====================
+-- ==================== СОЗДАНИЕ ИНТЕРФЕЙСА WINDUI (МИНИМАЛИЗМ) ====================
 Window = WindUI:CreateWindow({
-    Title = "Ride A Dino! 🦕 [Anime Edition]",
+    Title = "Ride A Dino! 🦕 [Minimalist Edition]",
     Icon = "flame",
     Author = "by Antigravity & ryomotik",
     Folder = "RideADinoAutofarm",
-    Size = UDim2.fromOffset(640, 540),
+    Size = UDim2.fromOffset(580, 450),
     Theme = "Rose",
     Transparent = true,
     Resizable = true,
@@ -517,192 +620,93 @@ task.spawn(function()
     applyCustomTheme(Config.Theme, Config.BgTransparency)
 end)
 
--- Вкладки
-local TabAuto = Window:Tab({ Title = "Автофарм", Icon = "dumbbell" })
-local TabRide = Window:Tab({ Title = "Скачки & Индекс", Icon = "zap" })
-local TabVisuals = Window:Tab({ Title = "Стиль & Темы", Icon = "palette" })
-local TabStats = Window:Tab({ Title = "Статистика", Icon = "bar-chart-2" })
-local TabSettings = Window:Tab({ Title = "Настройки", Icon = "settings" })
+-- 3 Минималистичные вкладки (Минимализм - наше золото)
+local TabFarm = Window:Tab({ Title = "⚡ Главная (Фарм)", Icon = "zap" })
+local TabVisuals = Window:Tab({ Title = "🎨 Стиль & Визуал", Icon = "palette" })
+local TabStats = Window:Tab({ Title = "📊 Инфо & Настройки", Icon = "bar-chart-2" })
 
--- ==================== ВКЛАДКА 1: АВТОФАРМ ====================
-local secAuto = TabAuto:Section({ Title = "Автоматизация тренировки и загона", Opened = true })
+-- ==================== ВКЛАДКА 1: ФАРМ И СКАЧКИ ====================
+local secFast = TabFarm:Section({ Title = "Быстрые действия", Opened = true })
 
-secAuto:Toggle({
-    Title = "Авто-тренировка хвата (Grip)",
-    Desc = "Постоянное нахождение на тренажере и удержание хвата",
+secFast:Button({
+    Title = "⚡ Экипировать лучшее (Equip Best)",
+    Desc = "Купить и одеть лучшую ауру, машину, улучшить загон и маунта",
+    Callback = function()
+        equipBest()
+    end
+})
+
+local startCanyonRide -- пред-объявление
+
+secFast:Button({
+    Title = "🏇 Скачки прямо сейчас (Ride Now)",
+    Desc = "Немедленно оседлать маунта и запрыгнуть в каньон для приручения",
+    Callback = function()
+        if startCanyonRide then
+            task.spawn(startCanyonRide)
+        end
+    end
+})
+
+local secToggles = TabFarm:Section({ Title = "Автоматизация", Opened = true })
+
+secToggles:Toggle({
+    Title = "🔥 Полный автофарм базы (Base Auto)",
+    Desc = "Хватка, тренажеры, загон, ауры, награды и Anti-AFK",
     Value = Config.AutoTrain,
     Callback = function(val)
         Config.AutoTrain = val
-        safeNotify({
-            Title = "Автофарм",
-            Content = val and "Авто-тренировка включена" or "Авто-тренировка выключена",
-            Duration = 2,
-            Icon = "dumbbell"
-        })
-    end
-})
-
-secAuto:Toggle({
-    Title = "Авто-прокачка загона (Pen Upgrade)",
-    Desc = "Автоматическое улучшение загона при накоплении средств",
-    Value = Config.AutoPen,
-    Callback = function(val)
         Config.AutoPen = val
-        safeNotify({
-            Title = "Автофарм",
-            Content = val and "Авто-прокачка загона включена" or "Авто-прокачка загона выключена",
-            Duration = 2,
-            Icon = "home"
-        })
-    end
-})
-
-secAuto:Toggle({
-    Title = "Авто-покупка тренажеров (Machine Tier)",
-    Desc = "Приобретение следующего уровня машины при наличии денег",
-    Value = Config.AutoMachine,
-    Callback = function(val)
         Config.AutoMachine = val
-        safeNotify({
-            Title = "Автофарм",
-            Content = val and "Авто-покупка машин включена" or "Авто-покупка машин выключена",
-            Duration = 2,
-            Icon = "cpu"
-        })
-    end
-})
-
-secAuto:Toggle({
-    Title = "Авто-покупка и экипировка аур",
-    Desc = "Автоматическая покупка лучших аур с множителем хвата",
-    Value = Config.AutoAura,
-    Callback = function(val)
         Config.AutoAura = val
+        Config.AutoClaim = val
+        if val and not isPlayerOnMachine() then
+            teleportToStandAndMount()
+        end
         safeNotify({
-            Title = "Автофарм",
-            Content = val and "Авто-ауры включены" or "Авто-ауры выключены",
+            Title = "Автофарм базы",
+            Content = val and "Полный автофарм базы включен! 🚀" or "Автофарм выключен",
             Duration = 2,
             Icon = "zap"
         })
     end
 })
 
-secAuto:Toggle({
-    Title = "Авто-сбор наград (Rewards)",
-    Desc = "Сбор оффлайн наград и подарков каждые 30 секунд",
-    Value = Config.AutoClaim,
+secToggles:Toggle({
+    Title = "🦕 Авто-скачки и Приручение (Canyon Ride)",
+    Desc = "Периодические забеги по каньону и быстрое приручение",
+    Value = Config.AutoRide,
     Callback = function(val)
-        Config.AutoClaim = val
-    end
-})
-
-secAuto:Toggle({
-    Title = "Защита Anti-AFK",
-    Desc = "Предотвращает кик из игры за бездействие",
-    Value = Config.AntiAFK,
-    Callback = function(val)
-        Config.AntiAFK = val
-    end
-})
-
-local secActions = TabAuto:Section({ Title = "Быстрые действия", Opened = true })
-
-secActions:Button({
-    Title = "Встать на тренажер",
-    Desc = "Телепортироваться на свой тренажер и начать тренировку",
-    Callback = function()
-        teleportToStandAndMount()
+        Config.AutoRide = val
+        Config.AutoLeap = val
         safeNotify({
-            Title = "Тренажер",
-            Content = "Телепортация на тренажер...",
+            Title = "Скачки в каньоне",
+            Content = val and "Авто-скачки и приручение включены!" or "Авто-скачки выключены",
             Duration = 2,
-            Icon = "arrow-right-circle"
+            Icon = "zap"
         })
     end
 })
 
-secActions:Button({
-    Title = "Слезть с тренажера",
-    Desc = "Спешиться с текущей машины",
-    Callback = function()
-        NetBridge.machineDismount("jump")
-        safeNotify({
-            Title = "Тренажер",
-            Content = "Спешились с машины",
-            Duration = 2,
-            Icon = "log-out"
-        })
+secToggles:Toggle({
+    Title = "🎯 Охота на новых видов (Index Hunt)",
+    Desc = "Приоритет динозавров, которых еще нет в вашем Индексе",
+    Value = Config.HuntUnindexed,
+    Callback = function(val)
+        Config.HuntUnindexed = val
     end
 })
 
-secActions:Button({
-    Title = "Прокачать загон сейчас",
-    Desc = "Улучшить свой загон вручную",
-    Callback = function()
-        local success = tryUpgradePen()
-        if not success then
-            local pen = getMyPen()
-            local price = pen and pen:GetAttribute("Price") or 0
-            safeNotify({
-                Title = "Загон",
-                Content = "Недостаточно средств: нужно " .. Format.money(price),
-                Duration = 3,
-                Icon = "alert-circle"
-            })
-        end
-    end
-})
+local secRideInfo = TabFarm:Section({ Title = "Текущий Заезд в Каньоне", Opened = true })
+local pRideStatus = secRideInfo:Paragraph({ Title = "Статус скачек", Desc = "В ожидании (готов к заезду)" })
+local pTameProgress = secRideInfo:Paragraph({ Title = "Шкала приручения (Розовая шкала)", Desc = "Ожидание заезда (0%)" })
 
-secActions:Button({
-    Title = "Купить следующий тренажер",
-    Desc = "Приобрести следующий тир машины",
-    Callback = function()
-        local loadout = NetBridge.loadout()
-        local stats = NetBridge.stats()
-        local currentTier = loadout and loadout.tier or 1
-        local nextTier = currentTier + 1
-        local tierConfig = Gear.Tiers[nextTier]
-        if tierConfig and stats then
-            if stats.dollars >= tierConfig.price then
-                NetBridge.buy(nextTier)
-                safeNotify({
-                    Title = "Тренажер",
-                    Content = "Куплен тренажер: " .. tierConfig.name .. "!",
-                    Duration = 3,
-                    Icon = "check-circle"
-                })
-            else
-                safeNotify({
-                    Title = "Тренажер",
-                    Content = "Недостаточно средств: нужно " .. Format.money(tierConfig.price),
-                    Duration = 3,
-                    Icon = "alert-circle"
-                })
-            end
-        else
-            safeNotify({
-                Title = "Тренажер",
-                Content = "Достигнут максимальный уровень машины!",
-                Duration = 3,
-                Icon = "award"
-            })
-        end
-    end
-})
-
--- ==================== ВКЛАДКА 2: СКАЧКИ & ИНДЕКС ====================
-local secRide = TabRide:Section({ Title = "Автоскачки и Охота за Индексом", Opened = true })
-
-local pRideStatus = secRide:Paragraph({ Title = "Статус скачек", Desc = "В ожидании" })
-local pTameProgress = secRide:Paragraph({ Title = "Шкала приручения (Tame Bar)", Desc = "Ожидание заезда (0%)" })
-local pIndexCount = secRide:Paragraph({ Title = "Прогресс Индекса", Desc = "Загрузка..." })
-
--- Функция скачки с поиском редких и неизвестных динозавров
-local function startCanyonRide()
+-- Логика скачки по каньону с ручным управлением и мгновенной сменой целей
+startCanyonRide = function()
     if BotState.IsRiding then return end
     BotState.IsRiding = true
     BotState.RideStatus = "Подготовка к заезду..."
-    pRideStatus:SetDesc(BotState.RideStatus)
+    safeSetDesc(pRideStatus, BotState.RideStatus)
 
     safeNotify({
         Title = "Скачки 🦕",
@@ -728,7 +732,7 @@ local function startCanyonRide()
     if not hrp then
         BotState.IsRiding = false
         BotState.RideStatus = "Ошибка: персонаж не найден"
-        pRideStatus:SetDesc(BotState.RideStatus)
+        safeSetDesc(pRideStatus, BotState.RideStatus)
         return
     end
 
@@ -760,14 +764,14 @@ local function startCanyonRide()
         end
     end
 
-    BotState.RideStatus = "Скачка в каньоне! Поиск редких мобов..."
-    pRideStatus:SetDesc(BotState.RideStatus)
+    BotState.RideStatus = "Скачка в каньоне! Поиск мобов..."
+    safeSetDesc(pRideStatus, BotState.RideStatus)
 
-    -- 8. Цикл скачки и умного приручения (до 50 секунд)
+    -- 8. Цикл скачки, управления и мгновенной смены динозавров
     local rideEndTime = os.clock() + 50
     local lastTamedSpec = nil
 
-    while BotState.Running and os.clock() < rideEndTime do
+    while isAlive() and os.clock() < rideEndTime do
         local rState = NetBridge.state.ride
         if not rState or not rState.riding or RideModule.state.phase == "idle" then
             break
@@ -777,40 +781,63 @@ local function startCanyonRide()
         local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
         if not currentHrp then break end
 
+        -- Считываем ручной ввод игрока для свободного управления ("муваться")
+        local manualSteer = 0
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then
+            manualSteer = manualSteer - 1
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then
+            manualSteer = manualSteer + 1
+        end
+
         local tameMode = TameModule.state.mode
         local tameFrac = tonumber(TameModule.state.fraction) or 0
         local currentSpec = TameModule.state.specId or "Unknown"
         local angryLeft = tonumber(TameModule.state.angryLeft) or 0
         local isAirborne = (RideModule.state.phase == "airborne")
+        local isTamed = (tameMode == "tamed" or tameFrac >= 1.0)
 
         -- ========== СОСТОЯНИЕ 1: В ПОЛЁТЕ (AIRBORNE) ==========
         if isAirborne then
             BotState.RideStatus = "Прыжок в воздухе..."
-            pRideStatus:SetDesc(BotState.RideStatus)
-            pTameProgress:SetDesc("В полёте к цели...")
+            safeSetDesc(pRideStatus, BotState.RideStatus)
+            safeSetDesc(pTameProgress, "В полёте к цели...")
+            task.wait(0.12)
+            continue
+        end
+
+        -- ========== СОСТОЯНИЕ 2: ИДЁТ ПРИРУЧЕНИЕ (РОЗОВАЯ ШКАЛА ЗАПОЛНЯЕТСЯ) ==========
+        if tameMode == "filling" and tameFrac < 1.0 then
+            local percent = math.floor(tameFrac * 100)
+            BotState.RideStatus = string.format("Приручение: %s 💖", tostring(currentSpec))
+            safeSetDesc(pRideStatus, BotState.RideStatus)
+            safeSetDesc(pTameProgress, string.format("Розовая шкала: %d%% | Хватка: %s", percent, tostring(currentSpec)))
+
+            -- Разрешаем игроку свободно рулить даже во время приручения!
+            if manualSteer ~= 0 then
+                RideModule.state.steer = manualSteer
+            else
+                -- Авто-уклонение от стен каньона
+                local myX = currentHrp.Position.X
+                if myX < -24 then
+                    RideModule.state.steer = 0.4
+                elseif myX > 24 then
+                    RideModule.state.steer = -0.4
+                else
+                    RideModule.state.steer = 0
+                end
+            end
+
+            -- Пока шкала заполняется, удерживаемся и НЕ прыгаем!
+            RideModule.state.jumpWanted = false
             task.wait(0.15)
             continue
         end
 
-        -- ========== СОСТОЯНИЕ 2: ИДЁТ ПРИРУЧЕНИЕ (РОЗОВАЯ ШКАЛА) ==========
-        if tameMode == "filling" and tameFrac < 1.0 then
-            local percent = math.floor(tameFrac * 100)
-            BotState.RideStatus = string.format("Приручение: %s 💖", tostring(currentSpec))
-            pRideStatus:SetDesc(BotState.RideStatus)
-            pTameProgress:SetDesc(string.format("Розовая шкала: %d%% | Хватка: %s", percent, tostring(currentSpec)))
-
-            -- КРИТИЧЕСКИ ВАЖНО: Во время заполнения шкалы НЕ ПРЫГАЕМ! Удерживаемся на динозавре!
-            RideModule.state.steer = 0
-            RideModule.state.jumpWanted = false
-
-            task.wait(0.2)
-            continue
-        end
-
         -- ========== СОСТОЯНИЕ 3: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН! ==========
-        if (tameMode == "tamed" or tameFrac >= 1.0) and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
+        if isTamed and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
             lastTamedSpec = currentSpec
-            pTameProgress:SetDesc(string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
+            safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
             safeNotify({
                 Title = "Приручен! 🎉",
                 Content = "Новый вид: " .. tostring(currentSpec) .. " добавлен в коллекцию!",
@@ -820,9 +847,9 @@ local function startCanyonRide()
             checkAndClaimIndex()
         end
 
-        -- ========== СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА В КАНЬОНЕ ==========
+        -- ========== СОСТОЯНИЕ 4: МГНОВЕННЫЙ ПЕРЕСКОК НА НОВОГО ДИНОЗАВРА ==========
         local bestTarget = nil
-        local bestDist = 160
+        local bestDist = 180
         local targetIsUnindexed = false
 
         local herd = workspace:FindFirstChild("StampedeHerd")
@@ -833,7 +860,7 @@ local function startCanyonRide()
                     local dPos = dino.PrimaryPart.Position
                     local dz = dPos.Z - myPos.Z
                     -- Берём только тех, кто впереди нас по каньону
-                    if dz > 5 and dz < 140 then
+                    if dz > 3 and dz < 150 then
                         local dist = (dPos - myPos).Magnitude
                         local name = dino.Name
                         local isUnknown = not NetBridge.knows(name)
@@ -872,38 +899,62 @@ local function startCanyonRide()
             local targetPos = bestTarget.PrimaryPart.Position
             local diffX = targetPos.X - currentHrp.Position.X
 
-            -- Плавно подруливаем к выбранной цели
-            RideModule.state.steer = math.clamp(diffX / 14, -1, 1)
+            -- Если игрок рулит сам, отдаем приоритет игроку, иначе подруливаем к цели
+            if manualSteer ~= 0 then
+                RideModule.state.steer = manualSteer
+            else
+                RideModule.state.steer = math.clamp(diffX / 12, -1, 1)
+            end
 
-            local statusDesc = targetIsUnindexed and ("🎯 Охота на НОВОГО: " .. bestTarget.Name) or ("Скачка: цель " .. bestTarget.Name)
+            local statusDesc = targetIsUnindexed and ("🎯 Охота на НОВОГО: " .. bestTarget.Name) or ("Цель: " .. bestTarget.Name)
             BotState.RideStatus = string.format("%s (дист. %.0fm)", statusDesc, bestDist)
-            pRideStatus:SetDesc(BotState.RideStatus)
+            safeSetDesc(pRideStatus, BotState.RideStatus)
 
-            -- Прыгаем, если приблизились (< 75 studs) ИЛИ если текущий динозавр скоро сбросит (angryLeft < 3)
-            local shouldJump = (bestDist <= 75 and math.abs(diffX) <= 25) or (angryLeft > 0 and angryLeft <= 2.5) or (tameMode == "warn")
+            -- ЕСЛИ УЖЕ ПРИРУЧЕН -> МГНОВЕННО МЕНЯЕМ НА НОВОГО (прыгаем сразу при дистанции <= 95)!
+            -- Иначе прыгаем при дистанции <= 75 или при сбросе (angryLeft <= 2.5)
+            local shouldJump = false
+            if isTamed then
+                -- Мгновенная смена: если приручен, прыгаем сразу на любого моба в радиусе досягаемости
+                shouldJump = (bestDist <= 75) or (bestDist <= 110 and math.abs(diffX) <= 35)
+            else
+                shouldJump = (bestDist <= 75 and math.abs(diffX) <= 22) or (angryLeft > 0 and angryLeft <= 2.5) or (tameMode == "warn")
+            end
+
             if shouldJump then
                 RideModule.state.jumpWanted = true
                 pcall(function()
                     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-                    task.wait(0.08)
+                    task.wait(0.06)
                     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
                 end)
-                task.wait(0.4)
+                task.wait(0.35)
             else
-                task.wait(0.15)
+                task.wait(0.12)
             end
         else
-            -- Целей впереди нет, едем прямо
-            RideModule.state.steer = 0
-            BotState.RideStatus = string.format("Скачка на %s (сброс через %.0fs)", tostring(currentSpec), angryLeft)
-            pRideStatus:SetDesc(BotState.RideStatus)
-            task.wait(0.2)
+            -- Целей впереди пока не найдено
+            if manualSteer ~= 0 then
+                RideModule.state.steer = manualSteer
+            else
+                local myX = currentHrp.Position.X
+                if myX < -22 then
+                    RideModule.state.steer = 0.4
+                elseif myX > 22 then
+                    RideModule.state.steer = -0.4
+                else
+                    RideModule.state.steer = 0
+                end
+            end
+
+            BotState.RideStatus = isTamed and "Приручен! Ищем следующего динозавра..." or string.format("Скачка на %s (сброс через %.0fs)", tostring(currentSpec), angryLeft)
+            safeSetDesc(pRideStatus, BotState.RideStatus)
+            task.wait(0.15)
         end
     end
 
     -- 9. Завершаем скачку и возвращаемся
     BotState.RideStatus = "Возврат в хаб и сбор наград..."
-    pRideStatus:SetDesc(BotState.RideStatus)
+    safeSetDesc(pRideStatus, BotState.RideStatus)
     pcall(function()
         NetBridge.rideEnd("done")
     end)
@@ -920,7 +971,7 @@ local function startCanyonRide()
 
     BotState.IsRiding = false
     BotState.RideStatus = "В ожидании (готов к следующей скачке)"
-    pRideStatus:SetDesc(BotState.RideStatus)
+    safeSetDesc(pRideStatus, BotState.RideStatus)
 
     safeNotify({
         Title = "Скачки 🦕",
@@ -930,92 +981,12 @@ local function startCanyonRide()
     })
 end
 
-secRide:Toggle({
-    Title = "Авто-скачки в каньоне (Auto Ride)",
-    Desc = "Периодические забеги по каньону на драконах и динозаврах",
-    Value = Config.AutoRide,
-    Callback = function(val)
-        Config.AutoRide = val
-        safeNotify({
-            Title = "Скачки",
-            Content = val and "Авто-скачки включены!" or "Авто-скачки выключены",
-            Duration = 2,
-            Icon = "zap"
-        })
-    end
-})
-
-secRide:Toggle({
-    Title = "Охота на новых динозавров (Hunt Missing)",
-    Desc = "Приоритет прыжков на мобов, которых еще нет в вашем Индексе",
-    Value = Config.HuntUnindexed,
-    Callback = function(val)
-        Config.HuntUnindexed = val
-    end
-})
-
-secRide:Toggle({
-    Title = "Авто-прыжки и приручение (Auto Leap)",
-    Desc = "Автоматические прыжки на диких мобов во время заезда",
-    Value = Config.AutoLeap,
-    Callback = function(val)
-        Config.AutoLeap = val
-    end
-})
-
-secRide:Toggle({
-    Title = "Авто-сбор наград Индекса (Claim Rewards)",
-    Desc = "Автоматически забирать алмазы и награды за открытые виды",
-    Value = Config.AutoClaimIndex,
-    Callback = function(val)
-        Config.AutoClaimIndex = val
-        if val then checkAndClaimIndex() end
-    end
-})
-
-secRide:Toggle({
-    Title = "Glow ESP на новых динозаврах",
-    Desc = "Золотая подсветка динозавров, которых еще нет в Индексе",
-    Value = Config.DinoESP,
-    Callback = function(val)
-        Config.DinoESP = val
-    end
-})
-
-secRide:Button({
-    Title = "🏇 Начать скачки прямо сейчас",
-    Desc = "Немедленно оседлать маунта и запрыгнуть в каньон",
-    Callback = function()
-        task.spawn(startCanyonRide)
-    end
-})
-
-secRide:Button({
-    Title = "🛑 Завершить скачку / Вернуться",
-    Desc = "Досрочно остановить заезд и телепортироваться в хаб",
-    Callback = function()
-        pcall(function()
-            NetBridge.rideEnd("done")
-        end)
-        task.wait(1)
-        if Config.AutoTrain then
-            teleportToStandAndMount()
-        end
-        safeNotify({
-            Title = "Скачки",
-            Content = "Заезд завершен, вернулись в хаб",
-            Duration = 2,
-            Icon = "home"
-        })
-    end
-})
-
--- ==================== ВКЛАДКА 3: СТИЛЬ & ТЕМЫ ====================
-local secTheme = TabVisuals:Section({ Title = "Кастомные Аниме Темы и Фоны", Opened = true })
+-- ==================== ВКЛАДКА 2: СТИЛЬ & ВИЗУАЛ ====================
+local secTheme = TabVisuals:Section({ Title = "Темы оформления интерфейса", Opened = true })
 
 secTheme:Dropdown({
     Title = "Тема оформления GUI",
-    Desc = "Выберите визуальный стиль интерфейса",
+    Desc = "Выберите визуальный стиль",
     Values = {
         "🌸 Sakura Pink (Тянка 1)",
         "🩸 Crimson Blood (Тянка 2)",
@@ -1035,8 +1006,8 @@ secTheme:Dropdown({
 })
 
 secTheme:Slider({
-    Title = "Прозрачность фона (Background Transparency)",
-    Desc = "Яркость аниме арта (10% = яркий арт, 90% = почти прозрачный)",
+    Title = "Прозрачность фона (10% - 90%)",
+    Desc = "Яркость аниме арта",
     Step = 5,
     Value = {
         Min = 10,
@@ -1053,146 +1024,37 @@ secTheme:Slider({
     end
 })
 
-local secCharacterVFX = TabVisuals:Section({ Title = "Эффекты персонажа (Опционально)", Opened = false })
+local secVisualFX = TabVisuals:Section({ Title = "Визуальные эффекты персонажа", Opened = true })
 
-secCharacterVFX:Toggle({
-    Title = "Космическая Аура и Партиклы",
-    Desc = "Искры и космический туман вокруг персонажа (по умолчанию выключено)",
+secVisualFX:Toggle({
+    Title = "✨ Космическая Аура (Chill VFX)",
+    Desc = "Искры, неоновый контур и след за персонажем",
     Value = Config.ChillVisuals,
     Callback = function(val)
         Config.ChillVisuals = val
         applyChillVisuals(val)
-        safeNotify({
-            Title = "Визуал персонажа",
-            Content = val and "Аура активирована!" or "Аура отключена",
-            Duration = 2,
-            Icon = "sparkles"
-        })
     end
 })
 
-secCharacterVFX:Button({
-    Title = "🧹 Очистить эффекты с персонажа",
-    Desc = "Удалить любые партиклы и свечение с персонажа",
-    Callback = function()
-        applyChillVisuals(false)
-        safeNotify({
-            Title = "Визуал",
-            Content = "Все эффекты с персонажа удалены!",
-            Duration = 2,
-            Icon = "check"
-        })
-    end
+-- ==================== ВКЛАДКА 3: ИНФО & НАСТРОЙКИ ====================
+local secStats = TabStats:Section({ Title = "Сводка персонажа", Opened = true })
+local pStatsOverview = secStats:Paragraph({
+    Title = "Показатели игрока",
+    Desc = "Загрузка данных..."
 })
 
--- ==================== ВКЛАДКА 4: СТАТИСТИКА ====================
-local secStats = TabStats:Section({ Title = "Текущие показатели игрока", Opened = true })
-
-local pGrip = secStats:Paragraph({ Title = "Хватка (Grip)", Desc = "Загрузка..." })
-local pDollars = secStats:Paragraph({ Title = "Баланс ($)", Desc = "Загрузка..." })
-local pIncome = secStats:Paragraph({ Title = "Доход загона ($/сек)", Desc = "Загрузка..." })
-local pAura = secStats:Paragraph({ Title = "Аура и Множитель", Desc = "Загрузка..." })
-local pMachine = secStats:Paragraph({ Title = "Текущий тренажер", Desc = "Загрузка..." })
-local pPen = secStats:Paragraph({ Title = "Загон и Вместимость", Desc = "Загрузка..." })
-
--- Обновление статистики
-local function updateStatsUI()
-    pcall(function()
-        local stats = NetBridge.stats()
-        local loadout = NetBridge.loadout()
-        local pen = NetBridge.pen()
-        local aura = NetBridge.state.aura
-        local penInstance = getMyPen()
-
-        if stats then
-            pGrip:SetDesc(Format.abbreviate(stats.grip or 0) .. " (" .. tostring(stats.grip or 0) .. ")")
-            pDollars:SetDesc(Format.money(stats.dollars or 0))
-        end
-
-        if pen then
-            pIncome:SetDesc(Format.money(pen.income or 0) .. " в секунду")
-        end
-
-        if aura and aura.equipped then
-            local auraData = Training.Auras[aura.equipped]
-            local mult = auraData and auraData.gripMult or 1
-            pAura:SetDesc(tostring(aura.equipped):upper() .. " (Множитель хвата: x" .. tostring(mult) .. ")")
-        end
-
-        if loadout then
-            local tier = loadout.tier or 1
-            local tierData = Gear.Tiers[tier]
-            local tierName = tierData and tierData.name or ("Tier " .. tostring(tier))
-            local nextTier = tier + 1
-            local nextTierData = Gear.Tiers[nextTier]
-            local nextText = nextTierData and (" • След.: " .. Format.money(nextTierData.price)) or " • МАКС."
-            pMachine:SetDesc(tierName .. nextText)
-        end
-
-        if penInstance then
-            local lvl = penInstance:GetAttribute("Level") or 1
-            local price = penInstance:GetAttribute("Price") or 0
-            local cap = (pen and pen.capacity) or "?"
-            local nextText = price > 0 and (" • След. апгрейд: " .. Format.money(price)) or " • МАКС."
-            pPen:SetDesc("Уровень " .. tostring(lvl) .. " (Вместимость: " .. tostring(cap) .. " дино)" .. nextText)
-        end
-
-        if IndexModule and IndexModule.state and IndexModule.state.known then
-            local knownCount = 0
-            for _ in pairs(IndexModule.state.known) do
-                knownCount = knownCount + 1
-            end
-            pIndexCount:SetDesc("Открыто видов: " .. tostring(knownCount) .. " / 58")
-        end
-    end)
-end
-
--- ==================== ВКЛАДКА 5: НАСТРОЙКИ ====================
-local secSettings = TabSettings:Section({ Title = "Параметры и темы", Opened = true })
-
-secSettings:Slider({
-    Title = "Интервал проверки (сек)",
-    Step = 1,
-    Value = {
-        Min = 1,
-        Max = 10,
-        Default = Config.CheckInterval,
-    },
-    Callback = function(val)
-        Config.CheckInterval = val
-    end
-})
+local secSettings = TabStats:Section({ Title = "Параметры", Opened = true })
 
 secSettings:Slider({
     Title = "Интервал авто-скачек (сек)",
-    Step = 30,
+    Step = 15,
     Value = {
-        Min = 60,
+        Min = 45,
         Max = 300,
         Default = Config.RideInterval,
     },
     Callback = function(val)
         Config.RideInterval = val
-    end
-})
-
-secSettings:Dropdown({
-    Title = "Быстрая тема (Quick Theme)",
-    Desc = "Переключение стиля оформления",
-    Values = {
-        "🌸 Sakura Pink (Тянка 1)",
-        "🩸 Crimson Blood (Тянка 2)",
-        "🖤 Dark Minimal",
-        "Rose",
-        "Crimson",
-        "Violet",
-        "Dark",
-        "Midnight"
-    },
-    Value = Config.Theme,
-    Callback = function(themeName)
-        Config.Theme = themeName
-        applyCustomTheme(themeName, Config.BgTransparency)
     end
 })
 
@@ -1207,6 +1069,64 @@ secSettings:Button({
         end
     end
 })
+
+-- Обновление сводки статистики в UI
+local function updateStatsUI()
+    pcall(function()
+        if not pStatsOverview then return end
+
+        local stats = NetBridge.stats()
+        local loadout = NetBridge.loadout()
+        local pen = NetBridge.pen()
+        local aura = NetBridge.state.aura
+        local penInstance = getMyPen()
+
+        local gripStr = stats and Format.abbreviate(stats.grip or 0) or "0"
+        local moneyStr = stats and Format.money(stats.dollars or 0) or "$0"
+        local incomeStr = pen and (Format.money(pen.income or 0) .. "/сек") or "$0/сек"
+
+        local auraStr = "Нет"
+        if aura and aura.equipped then
+            local auraData = Training.Auras[aura.equipped]
+            local mult = auraData and auraData.gripMult or 1
+            auraStr = tostring(aura.equipped):upper() .. " (x" .. tostring(mult) .. ")"
+        end
+
+        local machineStr = "Tier 1"
+        if loadout then
+            local tier = loadout.tier or 1
+            local tierData = Gear.Tiers[tier]
+            local nextTier = tier + 1
+            local nextTierData = Gear.Tiers[nextTier]
+            local nextText = nextTierData and (" (След: " .. Format.money(nextTierData.price) .. ")") or " (МАКС)"
+            machineStr = (tierData and tierData.name or ("Tier " .. tostring(tier))) .. nextText
+        end
+
+        local penStr = "Ур. 1"
+        if penInstance then
+            local lvl = penInstance:GetAttribute("Level") or 1
+            local price = penInstance:GetAttribute("Price") or 0
+            local cap = (pen and pen.capacity) or "?"
+            local nextText = price > 0 and (" (Апгрейд: " .. Format.money(price) .. ")") or " (МАКС)"
+            penStr = "Ур. " .. tostring(lvl) .. " [" .. tostring(cap) .. " дино]" .. nextText
+        end
+
+        local indexStr = "0 / 58"
+        if IndexModule and IndexModule.state and IndexModule.state.known then
+            local knownCount = 0
+            for _ in pairs(IndexModule.state.known) do
+                knownCount = knownCount + 1
+            end
+            indexStr = tostring(knownCount) .. " / 58"
+        end
+
+        local text = string.format(
+            "💪 Хватка (Grip): %s\n💰 Баланс: %s\n📈 Доход загона: %s\n⚡ Аура: %s\n🏋️ Машина: %s\n🏡 Загон: %s\n📖 Открыто в Индексе: %s",
+            gripStr, moneyStr, incomeStr, auraStr, machineStr, penStr, indexStr
+        )
+        safeSetDesc(pStatsOverview, text)
+    end)
+end
 
 -- Защита Anti-AFK
 local afkConn = LocalPlayer.Idled:Connect(function()
@@ -1258,7 +1178,7 @@ task.spawn(function()
         teleportToStandAndMount()
     end
 
-    while BotState.Running do
+    while isAlive() do
         local now = os.clock()
 
         -- Если идет заезд в каньоне, ждем его окончания
