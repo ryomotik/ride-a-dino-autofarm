@@ -26,7 +26,32 @@ local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local HttpService = game:GetService("HttpService")
 
-local httpRequest = (syn and syn.request) or (http and http.request) or http_request or (Fluxus and Fluxus.request) or request
+-- Универсальный поиск функции HTTP-запросов во всех экзекуторах
+local function getHttpRequest()
+    if type(request) == "function" then return request end
+    if type(http_request) == "function" then return http_request end
+    if syn and type(syn.request) == "function" then return syn.request end
+    if http and type(http.request) == "function" then return http.request end
+    if Fluxus and type(Fluxus.request) == "function" then return Fluxus.request end
+    if getgenv then
+        local ok, g = pcall(getgenv)
+        if ok and type(g) == "table" then
+            if type(g.request) == "function" then return g.request end
+            if type(g.http_request) == "function" then return g.http_request end
+            if g.syn and type(g.syn.request) == "function" then return g.syn.request end
+            if g.http and type(g.http.request) == "function" then return g.http.request end
+            if g.Fluxus and type(g.Fluxus.request) == "function" then return g.Fluxus.request end
+        end
+    end
+    return nil
+end
+
+local function sanitizeWebhookUrl(rawUrl)
+    if not rawUrl or type(rawUrl) ~= "string" then return "" end
+    return rawUrl:gsub("^%s*[\"']*", ""):gsub("[\"']*[%s\r\n]*$", ""):gsub("%s+", "")
+end
+
+local httpRequest = getHttpRequest()
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -124,6 +149,7 @@ local Config = {
     ToggleKey = "RightControl",       -- Клавиша открытия/скрытия меню
     ToggleKeyCode = Enum.KeyCode.RightControl,
     DiscordWebhook = "",              -- URL вебхука Discord
+    WebhookUseProxy = true,           -- Обход блокировки Discord в РФ через прокси lewisakura
     WebhookOnTame = true,             -- Уведомления о приручении динозавров
     WebhookPeriodic = false,          -- Периодический отчет (каждые 15 минут)
     WebhookInterval = 900,            -- 15 минут в секундах
@@ -446,32 +472,165 @@ end
 -- ==================== КАСТОМНЫЕ АНИМЕ ТЕМЫ И ФОНЫ ====================
 
 -- ==================== ДИСКОРД ВЕБХУК (DISCORD WEBHOOK) ====================
-local function sendDiscordWebhook(embed)
-    if not Config.DiscordWebhook or Config.DiscordWebhook == "" or not Config.DiscordWebhook:find("http") then
-        return
+local function safeFormatMoney(n)
+    local ok, res = pcall(function()
+        if Format and Format.money then return Format.money(n or 0) end
+    end)
+    if ok and res then return tostring(res) end
+    return "$" .. tostring(n or 0)
+end
+
+local function safeFormatAbbrev(n)
+    local ok, res = pcall(function()
+        if Format and Format.abbreviate then return Format.abbreviate(n or 0) end
+    end)
+    if ok and res then return tostring(res) end
+    return tostring(n or 0)
+end
+
+local function sendDiscordWebhook(embed, isTest, callback)
+    local rawUrl = sanitizeWebhookUrl(Config.DiscordWebhook)
+    if rawUrl == "" or not rawUrl:find("http") then
+        if callback then callback(false, "Укажите корректный URL вебхука (начинается с http)") end
+        return false, "No webhook URL"
+    end
+
+    local reqFn = getHttpRequest()
+    if not reqFn then
+        warn("[Ride A Dino Webhook] Ошибка: в экзекуторе не найдена функция request / http_request!")
+        if callback then callback(false, "Экзекутор не поддерживает функцию request") end
+        return false, "No HTTP request function found in executor"
     end
 
     task.spawn(function()
-        pcall(function()
-            if not httpRequest then return end
+        -- 1. Санитизация полей эмбеда по стандартам Discord API
+        if embed.fields and type(embed.fields) == "table" then
+            local sanitized = {}
+            for _, f in ipairs(embed.fields) do
+                if type(f) == "table" then
+                    local fn = tostring(f.name or "Инфо"):sub(1, 256)
+                    local fv = tostring(f.value or "-"):sub(1, 1024)
+                    if fn == "" then fn = "-" end
+                    if fv == "" then fv = "-" end
+                    table.insert(sanitized, {
+                        name = fn,
+                        value = fv,
+                        inline = (f.inline == true)
+                    })
+                end
+            end
+            embed.fields = sanitized
+        end
 
-            local payload = {
-                username = "Ride A Dino! Bot 🦕",
-                avatar_url = "https://raw.githubusercontent.com/ryomotik/ride-a-dino-autofarm/main/assets/anime1.png",
-                embeds = { embed }
+        local payload = {
+            username = "Ride A Dino! Bot 🦕",
+            avatar_url = "https://raw.githubusercontent.com/ryomotik/ride-a-dino-autofarm/main/assets/anime1.png",
+            embeds = { embed }
+        }
+
+        local jsonSuccess, json = pcall(function()
+            return HttpService:JSONEncode(payload)
+        end)
+
+        if not jsonSuccess or not json then
+            warn("[Ride A Dino Webhook] Ошибка JSONEncode: " .. tostring(json))
+            if callback then callback(false, "Ошибка создания JSON: " .. tostring(json)) end
+            return
+        end
+
+        local reqHeaders = {
+            ["Content-Type"] = "application/json",
+            ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        local function executeRequest(targetUrl)
+            local reqOptions = {
+                Url = targetUrl,
+                url = targetUrl,
+                Method = "POST",
+                method = "POST",
+                Headers = reqHeaders,
+                headers = reqHeaders,
+                Body = json,
+                body = json
             }
 
-            local json = HttpService:JSONEncode(payload)
-            httpRequest({
-                Url = Config.DiscordWebhook,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json"
-                },
-                Body = json
-            })
-        end)
+            local ok, res = pcall(function()
+                return reqFn(reqOptions)
+            end)
+
+            return ok, res
+        end
+
+        -- 2. Цепочка URL: автоматический обход блокировки discord.com через прокси lewisakura
+        local urlsToTry = {}
+        local isDiscordDomain = rawUrl:find("discord%.com") or rawUrl:find("discordapp%.com")
+
+        if isDiscordDomain then
+            local proxyUrl = rawUrl:gsub("discord%.com", "webhook.lewisakura.moe"):gsub("discordapp%.com", "webhook.lewisakura.moe")
+            if Config.WebhookUseProxy then
+                -- Если пользователь выбрал прокси (по умолчанию для РФ) - сначала пробуем через прокси
+                table.insert(urlsToTry, proxyUrl)
+                table.insert(urlsToTry, rawUrl)
+            else
+                -- Иначе сначала напрямую, а при ошибке - через прокси
+                table.insert(urlsToTry, rawUrl)
+                table.insert(urlsToTry, proxyUrl)
+            end
+        else
+            table.insert(urlsToTry, rawUrl)
+        end
+
+        local finalSuccess = false
+        local lastStatus = 0
+        local lastMsg = ""
+
+        for idx, tryUrl in ipairs(urlsToTry) do
+            local ok, res = executeRequest(tryUrl)
+            if ok and type(res) == "table" then
+                local statusCode = tonumber(res.StatusCode or res.status_code or res.statusCode) or 0
+                local body = tostring(res.Body or res.body or "")
+                lastStatus = statusCode
+                lastMsg = body
+
+                -- Discord возвращает 204 No Content или 200 OK при успешной доставке
+                if statusCode == 204 or statusCode == 200 then
+                    finalSuccess = true
+                    print(string.format("[Ride A Dino Webhook] ✅ Успешно отправлено через %s (HTTP %d)", (tryUrl:find("lewisakura") and "Proxy" or "Direct"), statusCode))
+                    break
+                else
+                    warn(string.format("[Ride A Dino Webhook] Попытка %d (%s) вернула HTTP %d: %s", idx, tryUrl, statusCode, body:sub(1, 150)))
+                end
+            else
+                lastMsg = tostring(res)
+                warn(string.format("[Ride A Dino Webhook] Попытка %d (%s) ошибка pcall: %s", idx, tryUrl, tostring(res)))
+            end
+            task.wait(0.25)
+        end
+
+        if callback then
+            if finalSuccess then
+                callback(true, "Отправлено успешно! (HTTP " .. tostring(lastStatus) .. ")")
+            else
+                local errDesc = "HTTP " .. tostring(lastStatus)
+                if lastStatus == 404 then
+                    errDesc = "Ошибка 404: Вебхук не найден! Проверьте ссылку в Discord."
+                elseif lastStatus == 401 then
+                    errDesc = "Ошибка 401: Неверный токен вебхука Discord."
+                elseif lastStatus == 403 then
+                    errDesc = "Ошибка 403: Доступ заблокирован Discord/Cloudflare."
+                elseif lastStatus == 400 then
+                    errDesc = "Ошибка 400: Неверный запрос (Bad Request)."
+                elseif lastStatus == 429 then
+                    errDesc = "Ошибка 429: Лимит запросов Discord. Подождите 1 минуту."
+                elseif lastStatus == 0 then
+                    errDesc = "Ошибка соединения: " .. tostring(lastMsg):sub(1, 70)
+                end
+                callback(false, errDesc)
+            end
+        end
     end)
+    return true
 end
 
 local function notifyWebhookTamed(specId, isNew, size, mutation)
@@ -486,9 +645,9 @@ local function notifyWebhookTamed(specId, isNew, size, mutation)
             for _ in pairs(IndexModule.state.known) do knownCount = knownCount + 1 end
         end
 
-        local gripText = stats and Format.abbreviate(stats.grip or 0) or "0"
-        local moneyText = stats and Format.money(stats.dollars or 0) or "$0"
-        local incomeText = pen and (Format.money(pen.income or 0) .. "/сек") or "$0/сек"
+        local gripText = safeFormatAbbrev(stats and stats.grip or 0)
+        local moneyText = safeFormatMoney(stats and stats.dollars or 0)
+        local incomeText = pen and (safeFormatMoney(pen.income or 0) .. "/сек") or "$0/сек"
 
         local tag = ""
         if mutation ~= "None" and mutation ~= "" then
@@ -539,21 +698,21 @@ local function notifyWebhookTamed(specId, isNew, size, mutation)
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }
-        sendDiscordWebhook(embed)
+        sendDiscordWebhook(embed, false, nil)
     end)
 end
 
-local function sendStatsWebhookReport(isTest)
-    pcall(function()
+local function sendStatsWebhookReport(isTest, callback)
+    local ok, err = pcall(function()
         local stats = NetBridge.stats()
         local loadout = NetBridge.loadout()
         local pen = NetBridge.pen()
         local aura = NetBridge.state.aura
         local penInstance = getMyPen()
 
-        local gripText = stats and Format.abbreviate(stats.grip or 0) or "0"
-        local moneyText = stats and Format.money(stats.dollars or 0) or "$0"
-        local incomeText = pen and (Format.money(pen.income or 0) .. "/сек") or "$0/сек"
+        local gripText = safeFormatAbbrev(stats and stats.grip or 0)
+        local moneyText = safeFormatMoney(stats and stats.dollars or 0)
+        local incomeText = pen and (safeFormatMoney(pen.income or 0) .. "/сек") or "$0/сек"
 
         local auraStr = "Нет"
         if aura and aura.equipped then
@@ -601,8 +760,12 @@ local function sendStatsWebhookReport(isTest)
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }
-        sendDiscordWebhook(embed)
+        sendDiscordWebhook(embed, isTest, callback)
     end)
+
+    if not ok and callback then
+        callback(false, "Ошибка формирования отчета: " .. tostring(err))
+    end
 end
 
 -- ==================== ЭКИПИРОВКА ЛУЧШЕГО (EQUIP BEST) ====================
@@ -1415,13 +1578,14 @@ secSettings:Button({
 
 local secWebhook = TabStats:Section({ Title = "Дискорд Вебхук (Discord Webhook)", Opened = true })
 
-secWebhook:Input({
+local webhookInput
+webhookInput = secWebhook:Input({
     Title = "URL Вебхука (Webhook URL)",
     Desc = "Вставьте ссылку на ваш Discord Webhook",
     Value = Config.DiscordWebhook,
     Placeholder = "https://discord.com/api/webhooks/...",
     Callback = function(text)
-        Config.DiscordWebhook = text:gsub("%s+", "")
+        Config.DiscordWebhook = sanitizeWebhookUrl(text)
         if Config.DiscordWebhook ~= "" and Config.DiscordWebhook:find("http") then
             safeNotify({
                 Title = "Discord Webhook 📡",
@@ -1430,6 +1594,21 @@ secWebhook:Input({
                 Icon = "check"
             })
         end
+    end
+})
+
+secWebhook:Toggle({
+    Title = "🛡️ Прокси-сервер (Обход блокировок РФ / Discord)",
+    Desc = "Автоматический обход блокировки discord.com через прокси lewisakura",
+    Value = Config.WebhookUseProxy,
+    Callback = function(val)
+        Config.WebhookUseProxy = val
+        safeNotify({
+            Title = "Discord Прокси 🛡️",
+            Content = val and "Обход блокировок ВКЛЮЧЕН (через прокси)" or "Прямое подключение к Discord",
+            Duration = 2,
+            Icon = "shield"
+        })
     end
 })
 
@@ -1455,7 +1634,16 @@ secWebhook:Button({
     Title = "🧪 Проверить вебхук (Отправить тест)",
     Desc = "Отправить тестовое сообщение со статистикой в Discord",
     Callback = function()
-        if not Config.DiscordWebhook or Config.DiscordWebhook == "" or not Config.DiscordWebhook:find("http") then
+        -- Подтягиваем значение из инпута если пользователь только вставил ссылку
+        if webhookInput then
+            local currentVal = webhookInput.Value or (webhookInput.GetValue and webhookInput:GetValue())
+            if currentVal and type(currentVal) == "string" and currentVal ~= "" then
+                Config.DiscordWebhook = sanitizeWebhookUrl(currentVal)
+            end
+        end
+
+        local cleanUrl = sanitizeWebhookUrl(Config.DiscordWebhook)
+        if cleanUrl == "" or not cleanUrl:find("http") then
             safeNotify({
                 Title = "Ошибка вебхука ⚠️",
                 Content = "Сначала укажите корректную ссылку на Discord Webhook!",
@@ -1464,13 +1652,31 @@ secWebhook:Button({
             })
             return
         end
-        sendStatsWebhookReport(true)
+
         safeNotify({
-            Title = "Тест отправлен! 🚀",
-            Content = "Проверьте ваш Discord канал!",
-            Duration = 3,
+            Title = "Отправка теста... 📡",
+            Content = "Устанавливаем связь с Discord...",
+            Duration = 2,
             Icon = "send"
         })
+
+        sendStatsWebhookReport(true, function(ok, msg)
+            if ok then
+                safeNotify({
+                    Title = "Успех! ✅",
+                    Content = "Тестовый отчет успешно доставлен в Discord!",
+                    Duration = 4,
+                    Icon = "check"
+                })
+            else
+                safeNotify({
+                    Title = "Ошибка вебхука ❌",
+                    Content = msg or "Не удалось отправить отчет в Discord",
+                    Duration = 5,
+                    Icon = "alert-triangle"
+                })
+            end
+        end)
     end
 })
 
