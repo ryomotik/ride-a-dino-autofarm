@@ -1,21 +1,19 @@
 --[[
-    🦕 Ride A Dino! [☄️] — Ultimate Autofarm & Dragon Rider Bot (Chill Edition)
+    🦕 Ride A Dino! [⚡] — Ultimate Energy & Base Autofarm (Minimalist Anime Edition)
     Разработано под игру "Ride A Dino!" (PlaceId: 93523763376122)
     
-    Визуальный стиль: WindUI Violet Neon (стильный молодёжный вайб, неоновые ауры и партиклы)
+    Фокус: Исключительно чистый фарм энергии (хвата) и прокачка базы!
     
     Возможности:
-    - 🏋️ Авто-тренировка хвата (Grip): непрерывный фарм на тренажере и удержание
-    - 🏡 Авто-прокачка загона (Pen Upgrade): умный апгрейд с телепортом к табличке ($/сек)
-    - 🦾 Авто-покупка новых тренажеров (Machine Tiers)
-    - ✨ Авто-покупка и экипировка лучших аур (Aura Multipliers)
+    - ⚡ Непрерывная тренировка энергии / хвата (Grip Auto-Train)
+    - 🦾 Авто-покупка лучших тренажеров (Machine Tiers)
+    - 🏡 Авто-прокачка загона с авто-телепортом ($/сек доход)
+    - ✨ Авто-покупка и экипировка лучших аур (Grip Multipliers)
     - 🎁 Авто-сбор оффлайн наград и подарков (Offline Rewards & Gifts)
-    - 🦕 Автоскачки в каньоне (Canyon Auto-Ride): заезды по каньону на драконах и динозаврах
-    - 🎯 Охота на новых динозавров (Hunt Unindexed Dinos): приоритет приручения тех, кого нет в Индексе
-    - 💎 Авто-сбор наград Индекса (Auto Claim Index Rewards): получение бонусов за открытые виды
-    - 🌌 Мощный Чил-Визуал: космическая неон-аура, партиклы, световой шлейф шагов (Trail)
-    - 🦖 Glow ESP: неоновая золотая подсветка редких и неизвестных динозавров в каньоне
-    - 🛡️ Защита Anti-AFK от кика за неактивность
+    - 💎 Кнопка «Экипировать лучшее» (Equip Best в один клик)
+    - 🛡️ Защита Anti-AFK от дисконнекта
+    - 🎨 Аниме стили WindUI (Sakura Pink, Crimson Blood, Dark Minimal)
+    - 📡 Discord Вебхук со статистикой базы и обходом блокировок
 ]]
 
 local Players = game:GetService("Players")
@@ -65,17 +63,11 @@ local Gear = require(RideADino.Config.Gear)
 local Training = require(RideADino.Config.Training)
 local Ranch = require(RideADino.Config.Ranch)
 local Auras = require(RideADino.Config.Auras)
-local Dinos = require(RideADino.Config.Dinos)
-local Track = require(RideADino.Config.Track)
-local TameConfig = require(RideADino.Config.Tame)
 
 local ClientModules = LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("RideADinoClient"):WaitForChild("Modules")
 local NetBridge = require(ClientModules:WaitForChild("NetBridge"))
 local GearMachine = require(ClientModules:WaitForChild("GearMachine"))
 local AuraShopModule = require(ClientModules:WaitForChild("AuraShop"))
-local RideModule = require(ClientModules:WaitForChild("Ride"))
-local TameModule = require(ClientModules:WaitForChild("Ride"):WaitForChild("Tame"))
-local LeapModule = require(ClientModules:WaitForChild("Ride"):WaitForChild("Leap"))
 local IndexModule = require(ClientModules:WaitForChild("Index"))
 
 -- Очистка старых окон WindUI
@@ -127,43 +119,33 @@ local function safeSetDesc(element, desc)
     end)
 end
 
--- Конфигурация бота
+-- Конфигурация бота (Фарм энергии и базы)
 local Config = {
-    AutoTrain = true,
-    AutoPen = true,
-    AutoMachine = true,
-    AutoAura = true,
-    AutoClaim = true,
-    AntiAFK = true,
-    AutoRide = true,          -- Автоскачки в каньоне
-    AutoLeap = true,          -- Прыжки на диких мобов
-    HuntUnindexed = true,     -- Охота на мобов, которых нет в Индексе
-    PrioritizeRare = true,    -- Приоритет редких видов, гигантов и мутаций
-    AutoClaimIndex = true,    -- Сбор наград Индекса
-    DinoESP = true,           -- Подсветка новых/редких динозавров
-    ChillVisuals = false,     -- Космическая неон-аура и шлейф (отключено по умолчанию)
+    AutoTrain = true,                 -- Авто-тренировка энергии (хвата)
+    AutoPen = true,                   -- Авто-прокачка загона ($/сек доход)
+    AutoMachine = true,               -- Авто-покупка тренажеров следующего тира
+    AutoAura = true,                  -- Авто-покупка и экипировка аур (множители)
+    AutoClaim = true,                 -- Авто-сбор оффлайн наград и подарков
+    AutoClaimIndex = true,            -- Авто-сбор наград Индекса
+    AntiAFK = true,                   -- Защита от AFK кика
+    ChillVisuals = false,             -- Космическая неон-аура и шлейф (визуал)
     Theme = "🌸 Sakura Pink (Тянка 1)",
     BgTransparency = 0.35,
-    RideInterval = 60,        -- Интервал между скачками (сек)
     CheckInterval = 2,
     ToggleKey = "RightControl",       -- Клавиша открытия/скрытия меню
     ToggleKeyCode = Enum.KeyCode.RightControl,
     DiscordWebhook = "",              -- URL вебхука Discord
     WebhookUseProxy = true,           -- Обход блокировки Discord в РФ через прокси lewisakura
-    WebhookOnTame = true,             -- Уведомления о приручении динозавров
     WebhookPeriodic = false,          -- Периодический отчет (каждые 15 минут)
     WebhookInterval = 900,            -- 15 минут в секундах
 }
 
 local BotState = {
     Running = true,
-    IsRiding = false,
     LastCheck = 0,
     LastClaim = 0,
     LastAuraCheck = 0,
-    LastRide = 0,
     LastWebhookReport = 0,
-    RideStatus = "В ожидании",
 }
 
 local function isAlive()
@@ -633,74 +615,6 @@ local function sendDiscordWebhook(embed, isTest, callback)
     return true
 end
 
-local function notifyWebhookTamed(specId, isNew, size, mutation)
-    if not Config.WebhookOnTame then return end
-    pcall(function()
-        size = size or "Normal"
-        mutation = mutation or "None"
-        local stats = NetBridge.stats()
-        local pen = NetBridge.pen()
-        local knownCount = 0
-        if IndexModule and IndexModule.state and IndexModule.state.known then
-            for _ in pairs(IndexModule.state.known) do knownCount = knownCount + 1 end
-        end
-
-        local gripText = safeFormatAbbrev(stats and stats.grip or 0)
-        local moneyText = safeFormatMoney(stats and stats.dollars or 0)
-        local incomeText = pen and (safeFormatMoney(pen.income or 0) .. "/сек") or "$0/сек"
-
-        local tag = ""
-        if mutation ~= "None" and mutation ~= "" then
-            tag = " [" .. mutation .. "]"
-        end
-        if size ~= "Normal" and size ~= "" then
-            tag = tag .. " (" .. size .. ")"
-        end
-
-        local title = ""
-        local color = 0xFF69B4
-        if isNew then
-            title = "🎉 ОТКРЫТ НОВЫЙ ВИД: " .. tostring(specId) .. tag .. "!"
-            color = 0xFFD700
-        elseif mutation == "Rainbow" or mutation == "Golden" then
-            title = "🌟 ЛЕГЕНДАРНАЯ МУТАЦИЯ: " .. tostring(specId) .. tag .. "!"
-            color = 0xFFD700
-        elseif size == "Colossal" or size == "Huge" or size == "Giant" then
-            title = "👑 ГИГАНТСКИЙ ДИНОЗАВР: " .. tostring(specId) .. tag .. "!"
-            color = 0xBA55D3
-        elseif mutation == "Silver" then
-            title = "✨ СЕРЕБРЯНЫЙ ДИНОЗАВР: " .. tostring(specId) .. tag .. "!"
-            color = 0xC0C0C0
-        else
-            title = "💖 Приручен: " .. tostring(specId) .. tag
-        end
-
-        local desc = isNew and "🦖 Новый динозавр добавлен в ваш Индекс!" or "🦕 Динозавр успешно оседлан и приручен на 100%!"
-
-        local fields = {
-            { name = "🦕 Вид", value = "`" .. tostring(specId) .. "`", inline = true },
-            { name = "📏 Размер", value = "`" .. tostring(size) .. "`", inline = true },
-            { name = "🧬 Мутация", value = "`" .. tostring(mutation) .. "`", inline = true },
-            { name = "📖 Индекс", value = string.format("`%d / 58`", knownCount), inline = true },
-            { name = "💰 Баланс", value = moneyText, inline = true },
-            { name = "💪 Хватка (Grip)", value = gripText, inline = true },
-            { name = "📈 Доход загона", value = incomeText, inline = true },
-            { name = "🎮 Игрок", value = LocalPlayer.Name, inline = true },
-        }
-
-        local embed = {
-            title = title,
-            description = desc,
-            color = color,
-            fields = fields,
-            footer = {
-                text = "Ride A Dino! • Anime Minimalist Edition"
-            },
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-        }
-        sendDiscordWebhook(embed, false, nil)
-    end)
-end
 
 local function sendStatsWebhookReport(isTest, callback)
     local ok, err = pcall(function()
@@ -835,20 +749,15 @@ local function equipBest()
             -- 3. Прокачиваем загон при наличии средств
             tryUpgradePen()
 
-            -- 4. Экипируем верхового маунта (слот 2 в хотбаре)
-            pcall(function()
-                NetBridge.equip(2, {slot = 2})
-            end)
-
-            -- 5. Телепорт на свой тренажер
+            -- 4. Возврат и посадка на свой тренажер
             task.wait(0.3)
             teleportToStandAndMount()
 
             safeNotify({
-                Title = "Готово! ✨",
-                Content = "Лучшая аура, тренажер и маунт экипированы!",
+                Title = "Готово! ⚡",
+                Content = "Лучшая аура, машина и загон экипированы!",
                 Duration = 3,
-                Icon = "check-circle"
+                Icon = "zap"
             })
         end)
     end)
@@ -941,11 +850,11 @@ end
 
 -- ==================== СОЗДАНИЕ ИНТЕРФЕЙСА WINDUI (МИНИМАЛИЗМ) ====================
 Window = WindUI:CreateWindow({
-    Title = "Ride A Dino! 🦕 [Minimalist Edition]",
-    Icon = "flame",
+    Title = "Ride A Dino! ⚡ [Energy Edition]",
+    Icon = "zap",
     Author = "by Antigravity & ryomotik",
     Folder = "RideADinoAutofarm",
-    Size = UDim2.fromOffset(580, 450),
+    Size = UDim2.fromOffset(560, 440),
     Theme = "Rose",
     Transparent = true,
     Resizable = true,
@@ -965,52 +874,36 @@ task.spawn(function()
     applyCustomTheme(Config.Theme, Config.BgTransparency)
 end)
 
--- 3 Минималистичные вкладки (Минимализм - наше золото)
-local TabFarm = Window:Tab({ Title = "⚡ Главная (Фарм)", Icon = "zap" })
+-- 3 Лаконичные вкладки (Энергия & База)
+local TabFarm = Window:Tab({ Title = "⚡ Фарм Энергии", Icon = "zap" })
 local TabVisuals = Window:Tab({ Title = "🎨 Стиль & Визуал", Icon = "palette" })
 local TabStats = Window:Tab({ Title = "📊 Инфо & Настройки", Icon = "bar-chart-2" })
 
--- ==================== ВКЛАДКА 1: ФАРМ И СКАЧКИ ====================
+-- ==================== ВКЛАДКА 1: ФАРМ ЭНЕРГИИ И БАЗЫ ====================
 local secFast = TabFarm:Section({ Title = "Быстрые действия", Opened = true })
 
 secFast:Button({
     Title = "⚡ Экипировать лучшее (Equip Best)",
-    Desc = "Купить и одеть лучшую ауру, машину, улучшить загон и маунта",
+    Desc = "Купить лучшую ауру, машину, прокачать загон и сесть на тренажер",
     Callback = function()
         equipBest()
     end
 })
 
-local startCanyonRide -- пред-объявление
-
-secFast:Button({
-    Title = "🏇 Скачки прямо сейчас (Ride Now)",
-    Desc = "Немедленно оседлать маунта и запрыгнуть в каньон для приручения",
-    Callback = function()
-        if startCanyonRide then
-            task.spawn(startCanyonRide)
-        end
-    end
-})
-
-local secToggles = TabFarm:Section({ Title = "Автоматизация (Минимализм)", Opened = true })
+local secToggles = TabFarm:Section({ Title = "Автоматизация тренировки и базы", Opened = true })
 
 secToggles:Toggle({
-    Title = "🧠 1000+ IQ Автофарм базы (Base Genius Auto)",
-    Desc = "Хватка, авто-тренажеры, авто-загон, авто-ауры, подарки и Anti-AFK",
+    Title = "⚡ Авто-тренировка энергии (Auto Grip Train)",
+    Desc = "Непрерывная тренировка на тренажере и удержание хвата",
     Value = Config.AutoTrain,
     Callback = function(val)
         Config.AutoTrain = val
-        Config.AutoPen = val
-        Config.AutoMachine = val
-        Config.AutoAura = val
-        Config.AutoClaim = val
         if val and not isPlayerOnMachine() then
             teleportToStandAndMount()
         end
         safeNotify({
-            Title = "Автофарм базы",
-            Content = val and "1000+ IQ автофарм базы включен! 🚀" or "Автофарм выключен",
+            Title = "Тренировка энергии ⚡",
+            Content = val and "Авто-тренировка энергии включена! 🚀" or "Авто-тренировка выключена",
             Duration = 2,
             Icon = "zap"
         })
@@ -1018,450 +911,67 @@ secToggles:Toggle({
 })
 
 secToggles:Toggle({
-    Title = "👑 1000+ IQ Скачки и Охота на редких (Canyon & Rare Rider)",
-    Desc = "Умный автопилот, приоритет редких драконов, мутаций, гигантов и руление A/D",
-    Value = Config.AutoRide,
+    Title = "🦾 Авто-покупка тренажеров (Auto Machines)",
+    Desc = "Автоматическая покупка машины следующего тира при наличии денег",
+    Value = Config.AutoMachine,
     Callback = function(val)
-        Config.AutoRide = val
-        Config.AutoLeap = val
-        Config.HuntUnindexed = val
-        Config.PrioritizeRare = val
+        Config.AutoMachine = val
         safeNotify({
-            Title = "Скачки в каньоне",
-            Content = val and "1000+ IQ скачки и охота на редких включены! 👑" or "Скачки выключены",
+            Title = "Тренажеры 🦾",
+            Content = val and "Авто-покупка тренажеров включена!" or "Авто-покупка выключена",
             Duration = 2,
-            Icon = "zap"
+            Icon = "award"
         })
     end
 })
 
-local secRideInfo = TabFarm:Section({ Title = "Текущий Заезд в Каньоне", Opened = true })
-local pRideStatus = secRideInfo:Paragraph({ Title = "Статус скачек", Desc = "В ожидании (готов к заезду)" })
-local pTameProgress = secRideInfo:Paragraph({ Title = "Шкала приручения (Розовая шкала)", Desc = "Ожидание заезда (0%)" })
-
--- Оценка ценности и редкости динозавра
-local function getDinoRarity(dino, playerGrip)
-    if not (dino and dino:IsA("Model")) then
-        return 0, false, "Normal", "None", 20, Color3.fromRGB(255, 255, 255), false, "Unknown"
+secToggles:Toggle({
+    Title = "🏡 Авто-прокачка загона (Auto Pen Upgrade)",
+    Desc = "Умный апгрейд таблички загона для повышения дохода ($/сек)",
+    Value = Config.AutoPen,
+    Callback = function(val)
+        Config.AutoPen = val
+        safeNotify({
+            Title = "Загон 🏡",
+            Content = val and "Авто-прокачка загона включена!" or "Авто-прокачка выключена",
+            Duration = 2,
+            Icon = "home"
+        })
     end
+})
 
-    local specId = dino:GetAttribute("SpecId") or dino.Name
-    local size = dino:GetAttribute("Size") or "Normal"
-    local mutation = dino:GetAttribute("Mutation") or "None"
-
-    local reqGrip = 20
-    pcall(function()
-        if TameConfig and TameConfig.gate then
-            reqGrip = TameConfig.gate(specId) or TameConfig.gate(dino.Name) or 20
-        elseif TameConfig and TameConfig.GATE then
-            reqGrip = TameConfig.GATE[specId] or TameConfig.GATE[dino.Name] or 20
-        end
-    end)
-
-    -- Базовый балл вида на основе требований к энергии (Grip Gate)
-    local baseScore = math.floor(math.log10(math.max(10, reqGrip)) * 120)
-
-    -- Множитель размера
-    local sizeMult = 1.0
-    if size == "Colossal" then
-        sizeMult = 5.0
-    elseif size == "Huge" then
-        sizeMult = 3.5
-    elseif size == "Giant" then
-        sizeMult = 2.5
-    elseif size == "Big" then
-        sizeMult = 1.4
-    elseif size == "Tiny" then
-        sizeMult = 0.7
+secToggles:Toggle({
+    Title = "✨ Авто-покупка и экипировка аур (Auto Auras)",
+    Desc = "Покупка и экипировка лучших доступных аур с умножителем энергии",
+    Value = Config.AutoAura,
+    Callback = function(val)
+        Config.AutoAura = val
+        safeNotify({
+            Title = "Ауры ✨",
+            Content = val and "Авто-экипировка аур включена!" or "Авто-экипировка выключена",
+            Duration = 2,
+            Icon = "sparkles"
+        })
     end
+})
 
-    -- Множитель мутации
-    local mutMult = 1.0
-    if mutation == "Rainbow" then
-        mutMult = 10.0
-    elseif mutation == "Golden" then
-        mutMult = 6.0
-    elseif mutation == "Spectral" or mutation == "Magma" or mutation == "Void" or mutation == "Electric" then
-        mutMult = 4.5
-    elseif mutation == "Mummified" or mutation == "Silver" then
-        mutMult = 3.0
-    elseif mutation ~= "None" and mutation ~= "" then
-        mutMult = 2.2
+secToggles:Toggle({
+    Title = "🎁 Авто-сбор оффлайн наград и подарков",
+    Desc = "Автоматический сбор таймеров подарков и оффлайн прибыли",
+    Value = Config.AutoClaim,
+    Callback = function(val)
+        Config.AutoClaim = val
     end
+})
 
-    local isUnknown = not NetBridge.knows(specId)
-    local unindexedBonus = isUnknown and 6000 or 0
-
-    local totalScore = math.floor((baseScore * sizeMult * mutMult) + unindexedBonus)
-
-    -- Цвет для ESP и интерфейса
-    local espColor = Color3.fromRGB(255, 255, 255)
-    local isSpecial = false
-    if mutation == "Rainbow" or mutation == "Golden" then
-        espColor = Color3.fromRGB(255, 215, 0)
-        isSpecial = true
-    elseif size == "Colossal" or size == "Huge" or size == "Giant" then
-        espColor = Color3.fromRGB(186, 85, 211)
-        isSpecial = true
-    elseif mutation == "Silver" or mutation == "Spectral" then
-        espColor = Color3.fromRGB(160, 220, 255)
-        isSpecial = true
-    elseif isUnknown then
-        espColor = Color3.fromRGB(255, 215, 0)
-        isSpecial = true
+secToggles:Toggle({
+    Title = "🛡️ Защита Anti-AFK",
+    Desc = "Предотвращает отключение от игры за неактивность",
+    Value = Config.AntiAFK,
+    Callback = function(val)
+        Config.AntiAFK = val
     end
-
-    return totalScore, isSpecial, size, mutation, reqGrip, espColor, isUnknown, specId
-end
-
--- 1000+ IQ Логика скачки по каньону
-startCanyonRide = function()
-    if BotState.IsRiding then return end
-    BotState.IsRiding = true
-    BotState.RideStatus = "Подготовка к заезду 1000+ IQ..."
-    safeSetDesc(pRideStatus, BotState.RideStatus)
-
-    safeNotify({
-        Title = "Скачки 1000+ IQ 🦕",
-        Content = "Запуск заезда в каньон...",
-        Duration = 3,
-        Icon = "zap"
-    })
-
-    -- 1. Спешиваемся с тренажера
-    if isPlayerOnMachine() then
-        pcall(function()
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-            task.wait(0.08)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-        end)
-        NetBridge.machineDismount("jump")
-        task.wait(0.4)
-    end
-
-    -- 2. Спешиваемся с хаб-маунта если есть
-    pcall(function()
-        if LocalPlayer.Character and LocalPlayer.Character:GetAttribute("HubMountSpecies") then
-            NetBridge.equip(2, {slot = nil})
-            task.wait(0.3)
-        end
-    end)
-
-    -- 3. Экипируем верхового маунта (слот 2 в хотбаре)
-    pcall(function()
-        NetBridge.equip(2, {slot = 2})
-    end)
-    task.wait(0.4)
-
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not (hrp and hum) then
-        BotState.IsRiding = false
-        BotState.RideStatus = "Ошибка: персонаж не найден"
-        safeSetDesc(pRideStatus, BotState.RideStatus)
-        return
-    end
-
-    -- 4. Отключаем коллизию RanchGate чтобы не блокировала прыжок
-    pcall(function()
-        local gate = workspace:FindFirstChild("RanchGate")
-        if gate then gate.CanCollide = false end
-    end)
-
-    -- 5. Телепортируемся на стартовую платформу прямо перед обрывом (Z = -210, Y = 28)
-    local startX = Track.CENTRE_X or 41.38
-    local startZ = Track.Z0 or -196.37
-    hrp.CFrame = CFrame.lookAt(Vector3.new(startX, 28, -210), Vector3.new(startX, 28, -100))
-    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    task.wait(0.25)
-
-    -- 6. Бежим вперед к обрыву и совершаем прыжок в каньон
-    hum:Move(Vector3.new(0, 0, 1), false)
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-    task.wait(0.55)
-
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-    task.wait(0.12)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-
-    task.wait(0.7)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
-    hum:Move(Vector3.new(0, 0, 0), false)
-
-    -- 7. Ожидаем подтверждения старта заезда
-    BotState.RideStatus = "Ожидание старта заезда..."
-    safeSetDesc(pRideStatus, BotState.RideStatus)
-
-    local waitStart = os.clock()
-    while os.clock() - waitStart < 5 do
-        task.wait(0.2)
-        if NetBridge.state.ride and NetBridge.state.ride.riding then
-            break
-        end
-    end
-
-    if not (NetBridge.state.ride and NetBridge.state.ride.riding) then
-        BotState.IsRiding = false
-        BotState.RideStatus = "Не удалось начать заезд. Повтор через минуту."
-        safeSetDesc(pRideStatus, BotState.RideStatus)
-        return
-    end
-
-    BotState.RideStatus = "1000+ IQ Скачка в каньоне! Поиск редких драконов..."
-    safeSetDesc(pRideStatus, BotState.RideStatus)
-
-    -- 8. Главный 1000+ IQ автопилот приручения
-    local lastTamedSpec = nil
-
-    while isAlive() do
-        local rState = NetBridge.state.ride
-        if not rState or not rState.riding then
-            break
-        end
-
-        local currentChar = LocalPlayer.Character
-        local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
-        if not currentHrp then break end
-
-        local currentZ = currentHrp.Position.Z
-        local myX = currentHrp.Position.X
-
-        -- Определение локации и дистанции
-        local zoneName = "Canyon"
-        pcall(function()
-            local stage = Track.stageAt and Track.stageAt(currentZ)
-            if stage then zoneName = stage.name end
-        end)
-        local distanceM = math.max(0, math.floor(currentZ - startZ))
-
-        -- Динамический центр каньона
-        local trackCenter = startX
-        pcall(function()
-            trackCenter = Track.centreX(currentZ) or startX
-        end)
-        local diffCenter = trackCenter - myX
-
-        -- Энергия игрока (Grip)
-        local stats = NetBridge.stats()
-        local playerGrip = stats and stats.grip or 0
-
-        -- Свободное ручное управление игрока A/D (приоритет 100%)
-        local manualSteer = 0
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then
-            manualSteer = manualSteer - 1
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then
-            manualSteer = manualSteer + 1
-        end
-
-        local tameMode = TameModule.state.mode
-        local tameFrac = tonumber(TameModule.state.fraction) or 0
-        local currentSpec = TameModule.state.specId or "Unknown"
-        local angryLeft = tonumber(TameModule.state.angryLeft) or 0
-        local isAirborne = (RideModule.state.phase == "airborne")
-        local isTamed = (tameMode == "tamed" or tameFrac >= 1.0)
-
-        -- 1. СОСТОЯНИЕ: В ПОЛЁТЕ
-        if isAirborne then
-            BotState.RideStatus = string.format("[%s • %dm] В полёте к цели... 🚀", zoneName, distanceM)
-            safeSetDesc(pRideStatus, BotState.RideStatus)
-            safeSetDesc(pTameProgress, "В полёте...")
-            task.wait(0.1)
-            continue
-        end
-
-        -- 2. СОСТОЯНИЕ: ПРИРУЧЕНИЕ (РОЗОВАЯ ШКАЛА ЗАПОЛНЯЕТСЯ)
-        if tameMode == "filling" and tameFrac < 1.0 then
-            local percent = math.floor(tameFrac * 100)
-            BotState.RideStatus = string.format("[%s • %dm] Приручение: %s 💖 (%d%%)", zoneName, distanceM, tostring(currentSpec), percent)
-            safeSetDesc(pRideStatus, BotState.RideStatus)
-            safeSetDesc(pTameProgress, string.format("Розовая шкала: %d%% [%s]", percent, tostring(currentSpec)))
-
-            if manualSteer ~= 0 then
-                RideModule.state.steer = manualSteer
-            else
-                -- Умное подруливание по центру каньона
-                RideModule.state.steer = math.clamp(diffCenter / 12, -0.7, 0.7)
-            end
-
-            RideModule.state.jumpWanted = false
-            task.wait(0.12)
-            continue
-        end
-
-        -- 3. СОСТОЯНИЕ: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН (100%)
-        if isTamed and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
-            local currentSize = TameModule.state.size or TameModule.state.settledSize or "Normal"
-            local currentMut = TameModule.state.mutation or TameModule.state.settledMutation or "None"
-            local isNew = not NetBridge.knows(currentSpec)
-            lastTamedSpec = currentSpec
-
-            local notifTitle = isNew and "🎉 ОТКРЫТ НОВЫЙ ВИД!" or "Приручен! 💖"
-            if currentMut ~= "None" and currentMut ~= "" then
-                notifTitle = "🌟 [" .. currentMut .. "] " .. tostring(currentSpec) .. "!"
-            elseif currentSize == "Colossal" or currentSize == "Huge" or currentSize == "Giant" then
-                notifTitle = "👑 (" .. currentSize .. ") " .. tostring(currentSpec) .. "!"
-            end
-
-            safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
-            safeNotify({
-                Title = notifTitle,
-                Content = tostring(currentSpec) ..
-                    (currentMut ~= "None" and (" [" .. currentMut .. "]") or "") ..
-                    (currentSize ~= "Normal" and (" (" .. currentSize .. ")") or ""),
-                Duration = 4,
-                Icon = "heart"
-            })
-            checkAndClaimIndex()
-            notifyWebhookTamed(currentSpec, isNew, currentSize, currentMut)
-        end
-
-        -- 4. 1000+ IQ ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА / ДРАКОНА
-        local bestTarget = nil
-        local bestDist = 180
-        local bestScore = -1
-        local targetLabel = ""
-
-        local herd = workspace:FindFirstChild("StampedeHerd")
-        if herd then
-            local myPos = currentHrp.Position
-            for _, dino in ipairs(herd:GetChildren()) do
-                if dino:IsA("Model") and dino.PrimaryPart then
-                    local dPos = dino.PrimaryPart.Position
-                    local dz = dPos.Z - myPos.Z
-                    local dx = dPos.X - myPos.X
-
-                    -- Только мобы впереди нас в пределах зоны досягаемости
-                    if dz > 4 and dz < 160 and math.abs(dx) <= (dz * 0.9 + 25) then
-                        local score, isSpecial, size, mut, reqGrip, espColor, isUnknown, specId = getDinoRarity(dino, playerGrip)
-
-                        -- Фильтр энергии (Grip Gate): прыгаем только если энергии хватает
-                        if reqGrip <= playerGrip then
-                            local dist = (dPos - myPos).Magnitude
-
-                            -- Glow ESP для редких, мутаций, гигантов и новых
-                            if Config.DinoESP and isSpecial and not dino:FindFirstChild("DinoRarityGlow") then
-                                pcall(function()
-                                    local hl = Instance.new("Highlight")
-                                    hl.Name = "DinoRarityGlow"
-                                    hl.FillColor = espColor
-                                    hl.FillTransparency = 0.35
-                                    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-                                    hl.OutlineTransparency = 0.1
-                                    hl.Adornee = dino
-                                    hl.Parent = dino
-                                end)
-                            end
-
-                            -- 1000+ IQ алгоритм выбора:
-                            local isBetter = false
-                            if not bestTarget then
-                                isBetter = true
-                            elseif score > bestScore * 1.15 then
-                                -- Заметно более редкий дракон / мутация / гигант -> отдаем приоритет даже если дальше
-                                isBetter = true
-                            elseif score >= bestScore * 0.85 and dist < bestDist then
-                                -- Схожая ценность (в пределах 15%), но этот ближе -> выбираем более близкого
-                                isBetter = true
-                            end
-
-                            if isBetter then
-                                bestTarget = dino
-                                bestDist = dist
-                                bestScore = score
-
-                                local tags = {}
-                                if mut ~= "None" and mut ~= "" then table.insert(tags, mut) end
-                                if size ~= "Normal" and size ~= "" then table.insert(tags, size) end
-                                if isUnknown then table.insert(tags, "NEW") end
-                                targetLabel = dino.Name .. (#tags > 0 and (" [" .. table.concat(tags, ", ") .. "]") or "")
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if bestTarget and bestTarget.PrimaryPart then
-            local targetPos = bestTarget.PrimaryPart.Position
-            local diffX = targetPos.X - currentHrp.Position.X
-
-            -- Руление: ручной ввод игрока имеет наивысший приоритет
-            if manualSteer ~= 0 then
-                RideModule.state.steer = manualSteer
-            else
-                -- Умное подруливание к цели
-                RideModule.state.steer = math.clamp(diffX / 10, -1, 1)
-            end
-
-            BotState.RideStatus = string.format("[%s • %dm] 🎯 Цель: %s (%.0fm)", zoneName, distanceM, targetLabel, bestDist)
-            safeSetDesc(pRideStatus, BotState.RideStatus)
-
-            -- Прыжок:
-            -- Если текущий уже приручен на 100% -> МГНОВЕННО ПЕРЕСКАКИВАЕМ на следующего!
-            -- Если таймер сброса заканчивается (angryLeft <= 3.0) -> ЭКСТРЕННЫЙ ПРЫЖОК на любого!
-            -- Иначе прыгаем при дистанции <= 75
-            local shouldJump = false
-            if isTamed then
-                shouldJump = (bestDist <= 85) or (bestDist <= 120 and math.abs(diffX) <= 30)
-            else
-                shouldJump = (bestDist <= 72 and math.abs(diffX) <= 22)
-                    or (angryLeft > 0 and angryLeft <= 3.0)
-                    or (tameMode == "warn")
-            end
-
-            if shouldJump then
-                RideModule.state.jumpWanted = true
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-                    task.wait(0.06)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-                end)
-                task.wait(0.3)
-            else
-                task.wait(0.1)
-            end
-        else
-            -- Целей впереди пока нет: держим динамический центр
-            if manualSteer ~= 0 then
-                RideModule.state.steer = manualSteer
-            else
-                RideModule.state.steer = math.clamp(diffCenter / 12, -0.7, 0.7)
-            end
-
-            local baseDesc = isTamed
-                and "Приручен! Скачем вперед в следующую локацию..."
-                or string.format("Скачка на %s (%.0fs до сброса)", tostring(currentSpec), angryLeft)
-            BotState.RideStatus = string.format("[%s • %dm] %s", zoneName, distanceM, baseDesc)
-            safeSetDesc(pRideStatus, BotState.RideStatus)
-            task.wait(0.12)
-        end
-    end
-
-    -- Завершение заезда
-    BotState.RideStatus = "Возврат в хаб и сбор наград..."
-    safeSetDesc(pRideStatus, BotState.RideStatus)
-    pcall(function() NetBridge.rideEnd("done") end)
-    task.wait(1.5)
-
-    checkAndClaimIndex()
-    task.wait(0.5)
-    if Config.AutoTrain then
-        teleportToStandAndMount()
-    end
-
-    BotState.IsRiding = false
-    BotState.RideStatus = "В ожидании (готов к следующей скачке)"
-    safeSetDesc(pRideStatus, BotState.RideStatus)
-
-    safeNotify({
-        Title = "Скачки 🦕",
-        Content = "Заезд завершен! Награды собраны, вернулись на тренажер.",
-        Duration = 3,
-        Icon = "check"
-    })
-end
+})
 
 -- ==================== ВКЛАДКА 2: СТИЛЬ & ВИЗУАЛ ====================
 local secTheme = TabVisuals:Section({ Title = "Темы оформления интерфейса", Opened = true })
@@ -1551,19 +1061,6 @@ secSettings:Keybind({
     end
 })
 
-secSettings:Slider({
-    Title = "Интервал авто-скачек (сек)",
-    Step = 15,
-    Value = {
-        Min = 45,
-        Max = 300,
-        Default = Config.RideInterval,
-    },
-    Callback = function(val)
-        Config.RideInterval = val
-    end
-})
-
 secSettings:Button({
     Title = "Выгрузить автофарм (Unload)",
     Desc = "Полностью закрыть скрипт и очистить интерфейс",
@@ -1609,15 +1106,6 @@ secWebhook:Toggle({
             Duration = 2,
             Icon = "shield"
         })
-    end
-})
-
-secWebhook:Toggle({
-    Title = "Оповещения о приручении (Tame Alerts)",
-    Desc = "Отправлять уведомление в Discord при приручении динозавра",
-    Value = Config.WebhookOnTame,
-    Callback = function(val)
-        Config.WebhookOnTame = val
     end
 })
 
@@ -1851,11 +1339,6 @@ task.spawn(function()
                 checkAndClaimIndex()
             end
 
-            -- Автоскачки в каньоне (периодический заезд за новыми динозаврами)
-            if Config.AutoRide and (now - BotState.LastRide >= Config.RideInterval) then
-                BotState.LastRide = now
-                task.spawn(startCanyonRide)
-            end
 
             -- Периодический отчет в Discord (каждые 15 минут)
             if Config.WebhookPeriodic and Config.DiscordWebhook ~= "" and (now - BotState.LastWebhookReport >= Config.WebhookInterval) then
