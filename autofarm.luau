@@ -1,17 +1,20 @@
 --[[
-    🦕 Ride A Dino! [☄️] — Ultimate Autofarm & Dragon Rider Bot (WindUI Edition)
+    🦕 Ride A Dino! [☄️] — Ultimate Autofarm & Dragon Rider Bot (Chill Edition)
     Разработано под игру "Ride A Dino!" (PlaceId: 93523763376122)
     
-    Визуальный стиль: WindUI (футуристичный дизайн с закругленными панелями, иконками и темами)
+    Визуальный стиль: WindUI Violet Neon (стильный молодёжный вайб, неоновые ауры и партиклы)
     
     Возможности:
-    - 🏋️ Авто-тренировка хвата (Grip): авто-посадка на тренажер и удержание
-    - 🏡 Авто-прокачка загона (Pen Upgrade): рост пассивного дохода ($/сек)
+    - 🏋️ Авто-тренировка хвата (Grip): непрерывный фарм на тренажере и удержание
+    - 🏡 Авто-прокачка загона (Pen Upgrade): умный апгрейд с телепортом к табличке ($/сек)
     - 🦾 Авто-покупка новых тренажеров (Machine Tiers)
     - ✨ Авто-покупка и экипировка лучших аур (Aura Multipliers)
     - 🎁 Авто-сбор оффлайн наград и подарков (Offline Rewards & Gifts)
-    - 🦕 Автоскачки в каньоне (Canyon Auto-Ride): забеги по каньону на динозаврах и драконах
-    - 🎯 Авто-приручение динозавров/драконов (Auto Leap & Tame): прыжки на диких динозавров
+    - 🦕 Автоскачки в каньоне (Canyon Auto-Ride): заезды по каньону на драконах и динозаврах
+    - 🎯 Охота на новых динозавров (Hunt Unindexed Dinos): приоритет приручения тех, кого нет в Индексе
+    - 💎 Авто-сбор наград Индекса (Auto Claim Index Rewards): получение бонусов за открытые виды
+    - 🌌 Мощный Чил-Визуал: космическая неон-аура, партиклы, световой шлейф шагов (Trail)
+    - 🦖 Glow ESP: неоновая золотая подсветка редких и неизвестных динозавров в каньоне
     - 🛡️ Защита Anti-AFK от кика за неактивность
 ]]
 
@@ -33,17 +36,19 @@ local Gear = require(RideADino.Config.Gear)
 local Training = require(RideADino.Config.Training)
 local Ranch = require(RideADino.Config.Ranch)
 local Auras = require(RideADino.Config.Auras)
+local Dinos = require(RideADino.Config.Dinos)
 
 local ClientModules = LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("RideADinoClient"):WaitForChild("Modules")
 local NetBridge = require(ClientModules:WaitForChild("NetBridge"))
 local GearMachine = require(ClientModules:WaitForChild("GearMachine"))
 local AuraShopModule = require(ClientModules:WaitForChild("AuraShop"))
 local RideModule = require(ClientModules:WaitForChild("Ride"))
+local IndexModule = require(ClientModules:WaitForChild("Index"))
 
 -- Очистка старых окон WindUI
 pcall(function()
     for _, c in ipairs(game:GetService("CoreGui"):GetChildren()) do
-        if c.Name == "WindUI" or c.Name == "RobloxGui" and c:FindFirstChild("WindUI") then
+        if c.Name == "WindUI" or (c.Name == "RobloxGui" and c:FindFirstChild("WindUI")) then
             local w = c:FindFirstChild("WindUI") or c
             w:Destroy()
         end
@@ -78,9 +83,13 @@ local Config = {
     AutoAura = true,
     AutoClaim = true,
     AntiAFK = true,
-    AutoRide = false,      -- Периодические скачки в каньоне
-    AutoLeap = true,       -- Прыжки на диких дино/драконов во время скачек
-    RideInterval = 120,    -- Интервал между скачками (сек)
+    AutoRide = true,          -- Автоскачки в каньоне
+    AutoLeap = true,          -- Прыжки на диких мобов
+    HuntUnindexed = true,     -- Охота на мобов, которых нет в Индексе
+    AutoClaimIndex = true,    -- Сбор наград Индекса
+    DinoESP = true,           -- Подсветка новых/редких динозавров
+    ChillVisuals = true,      -- Космическая неон-аура и шлейф
+    RideInterval = 120,       -- Интервал между скачками (сек)
     CheckInterval = 2,
 }
 
@@ -94,7 +103,126 @@ local BotState = {
     RideStatus = "В ожидании",
 }
 
--- Вспомогательные функции поиска стенда и загона игрока
+-- ==================== ЧИЛ-ВИЗУАЛ: АУРА, ПАРТИКЛЫ И ШЛЕЙФ ====================
+local function applyChillVisuals(enable)
+    pcall(function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        local oldAtt = hrp:FindFirstChild("ChillAuraAttachment")
+        if oldAtt then oldAtt:Destroy() end
+        local oldHl = char:FindFirstChild("ChillHighlight")
+        if oldHl then oldHl:Destroy() end
+        local oldTr = hrp:FindFirstChild("ChillTrail")
+        if oldTr then oldTr:Destroy() end
+        local a0 = hrp:FindFirstChild("TrailAtt0")
+        if a0 then a0:Destroy() end
+        local a1 = hrp:FindFirstChild("TrailAtt1")
+        if a1 then a1:Destroy() end
+
+        if not enable then return end
+
+        -- Аттачмент ауры
+        local att = Instance.new("Attachment")
+        att.Name = "ChillAuraAttachment"
+        att.Position = Vector3.new(0, -1, 0)
+        att.Parent = hrp
+
+        -- Неоновые космические искры
+        local pe = Instance.new("ParticleEmitter")
+        pe.Name = "ChillSparkles"
+        pe.Texture = "rbxassetid://6071575925"
+        pe.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 70, 255)),   -- Неоновый фиолетовый
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 230, 255)),  -- Неоновый бирюзовый
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 90, 190))    -- Неоновый розовый
+        })
+        pe.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.4),
+            NumberSequenceKeypoint.new(0.6, 0.6),
+            NumberSequenceKeypoint.new(1, 0)
+        })
+        pe.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.2),
+            NumberSequenceKeypoint.new(0.8, 0.4),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        pe.LightEmission = 1
+        pe.LightInfluence = 0
+        pe.Lifetime = NumberRange.new(1.0, 1.8)
+        pe.Rate = 24
+        pe.Speed = NumberRange.new(2.5, 4.5)
+        pe.SpreadAngle = Vector2.new(45, 45)
+        pe.EmissionDirection = Enum.NormalId.Top
+        pe.Drag = 1
+        pe.Parent = att
+
+        -- Космический туман
+        local mist = Instance.new("ParticleEmitter")
+        mist.Name = "ChillMist"
+        mist.Texture = "rbxassetid://243664672"
+        mist.Color = ColorSequence.new(Color3.fromRGB(140, 60, 255), Color3.fromRGB(0, 200, 255))
+        mist.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1.2),
+            NumberSequenceKeypoint.new(1, 2.5)
+        })
+        mist.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.6),
+            NumberSequenceKeypoint.new(0.5, 0.75),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        mist.LightEmission = 0.8
+        mist.LightInfluence = 0
+        mist.Lifetime = NumberRange.new(1.5, 2.2)
+        mist.Rate = 12
+        mist.Speed = NumberRange.new(1, 2)
+        mist.EmissionDirection = Enum.NormalId.Top
+        mist.Parent = att
+
+        -- Световой шлейф шагов (Ribbon Trail)
+        local att0 = Instance.new("Attachment")
+        att0.Name = "TrailAtt0"
+        att0.Position = Vector3.new(0, -1.8, 0.4)
+        att0.Parent = hrp
+
+        local att1 = Instance.new("Attachment")
+        att1.Name = "TrailAtt1"
+        att1.Position = Vector3.new(0, -1.8, -0.4)
+        att1.Parent = hrp
+
+        local tr = Instance.new("Trail")
+        tr.Name = "ChillTrail"
+        tr.Attachment0 = att0
+        tr.Attachment1 = att1
+        tr.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 240, 255)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(160, 60, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 180))
+        })
+        tr.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.2),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        tr.Lifetime = 0.6
+        tr.MinLength = 0.1
+        tr.LightEmission = 1
+        tr.FaceCamera = true
+        tr.Parent = hrp
+
+        -- Неоновый контур персонажа
+        local hl = Instance.new("Highlight")
+        hl.Name = "ChillHighlight"
+        hl.FillColor = Color3.fromRGB(130, 60, 240)
+        hl.FillTransparency = 0.8
+        hl.OutlineColor = Color3.fromRGB(0, 240, 255)
+        hl.OutlineTransparency = 0.2
+        hl.Adornee = char
+        hl.Parent = char
+    end)
+end
+
+-- ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 local function getMyStand()
     local userId = LocalPlayer.UserId
     local machines = workspace:FindFirstChild("RideADinoMachines")
@@ -151,7 +279,7 @@ local function teleportToStandAndMount()
     end
 end
 
--- Безопасная покупка и экипировка ауры
+-- Умная прокачка загона с телепортом к табличке
 local function tryUpgradePen()
     local pen, plotNum = getMyPen()
     local stats = NetBridge.stats()
@@ -183,7 +311,7 @@ local function tryUpgradePen()
 
         safeNotify({
             Title = "Загон прокачан!",
-            Content = "Уровень " .. tostring(lvl + 1) .. "! Вместимость и доход выросли.",
+            Content = "Уровень " .. tostring(lvl + 1) .. "! Вместимость и $/сек выросли.",
             Duration = 3,
             Icon = "trending-up"
         })
@@ -192,7 +320,7 @@ local function tryUpgradePen()
     return false
 end
 
--- Безопасная покупка и экипировка ауры
+-- Покупка и экипировка ауры
 local function tryUpgradeAura()
     local stats = NetBridge.stats()
     local auraState = NetBridge.state.aura
@@ -248,21 +376,44 @@ local function tryUpgradeAura()
     end
 end
 
--- Создание окна WindUI
+-- Сбор всех доступных наград Индекса
+local function checkAndClaimIndex()
+    pcall(function()
+        if not Config.AutoClaimIndex then return end
+        if IndexModule and IndexModule.state then
+            local claimed = IndexModule.state.claimed and IndexModule.state.claimed.species or {}
+            local known = IndexModule.state.known or {}
+            for specId, _ in pairs(known) do
+                if not claimed[specId] then
+                    NetBridge.indexClaim("species", specId)
+                    safeNotify({
+                        Title = "Индекс пополнен! 💎",
+                        Content = "Получена награда за вид: " .. tostring(specId),
+                        Duration = 3,
+                        Icon = "award"
+                    })
+                end
+            end
+        end
+    end)
+end
+
+-- ==================== СОЗДАНИЕ ИНТЕРФЕЙСА WINDUI ====================
 local Window = WindUI:CreateWindow({
     Title = "Ride A Dino! 🦕",
     Icon = "flame",
-    Author = "by Antigravity • Ultimate Edition",
+    Author = "by Antigravity • Chill Edition",
     Folder = "RideADinoAutofarm",
-    Size = UDim2.fromOffset(630, 520),
-    Theme = "Dark",
+    Size = UDim2.fromOffset(630, 530),
+    Theme = "Violet", -- Модный фиолетовый неоновый стиль
     Transparent = true,
     Resizable = true,
 })
 
 -- Вкладки
-local TabAuto = Window:Tab({ Title = "Автофарм", Icon = "sparkles" })
-local TabRide = Window:Tab({ Title = "Скачки", Icon = "zap" })
+local TabAuto = Window:Tab({ Title = "Автофарм", Icon = "dumbbell" })
+local TabRide = Window:Tab({ Title = "Скачки & Индекс", Icon = "zap" })
+local TabVFX = Window:Tab({ Title = "Визуал & Чил", Icon = "sparkles" })
 local TabStats = Window:Tab({ Title = "Статистика", Icon = "bar-chart-2" })
 local TabSettings = Window:Tab({ Title = "Настройки", Icon = "settings" })
 
@@ -432,16 +583,17 @@ secActions:Button({
     end
 })
 
--- ==================== ВКЛАДКА 2: СКАЧКИ В КАНЬОНЕ ====================
-local secRide = TabRide:Section({ Title = "Автоскачки на драконах и динозаврах", Opened = true })
+-- ==================== ВКЛАДКА 2: СКАЧКИ & ИНДЕКС ====================
+local secRide = TabRide:Section({ Title = "Автоскачки и Охота за Индексом", Opened = true })
 
-local pRideStatus = secRide:Paragraph({ Title = "Статус скачек", Desc = "Ожидание" })
+local pRideStatus = secRide:Paragraph({ Title = "Статус скачек", Desc = "В ожидании" })
+local pIndexCount = secRide:Paragraph({ Title = "Прогресс Индекса", Desc = "Загрузка..." })
 
--- Функция запуска скачки в каньоне
+-- Функция скачки с поиском редких и неизвестных динозавров
 local function startCanyonRide()
     if BotState.IsRiding then return end
     BotState.IsRiding = true
-    BotState.RideStatus = "Подготовка к скачке..."
+    BotState.RideStatus = "Подготовка к заезду..."
     pRideStatus:SetDesc(BotState.RideStatus)
 
     safeNotify({
@@ -457,7 +609,7 @@ local function startCanyonRide()
         task.wait(0.4)
     end
 
-    -- 2. Экипируем ездового динозавра (слот 2 в хотбаре)
+    -- 2. Экипируем верхового маунта (слот 2 в хотбаре)
     pcall(function()
         NetBridge.equip(2, {slot = 2})
     end)
@@ -500,7 +652,7 @@ local function startCanyonRide()
         end
     end
 
-    BotState.RideStatus = "Скачка в каньоне! Приручение..."
+    BotState.RideStatus = "Скачка в каньоне! Поиск редких мобов..."
     pRideStatus:SetDesc(BotState.RideStatus)
 
     -- 8. Цикл скачки (до 40 секунд)
@@ -511,29 +663,76 @@ local function startCanyonRide()
             break
         end
 
-        -- Авто-прыжки на диких динозавров/драконов (Auto Leap & Tame)
-        if Config.AutoLeap then
+        local currentChar = LocalPlayer.Character
+        local currentHrp = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+        if not currentHrp then break end
+
+        -- Поиск неизвестных динозавров в стаде каньона
+        local unindexedTarget = nil
+        local herd = workspace:FindFirstChild("StampedeHerd")
+        if herd and Config.HuntUnindexed then
+            local closestDist = 130
+            for _, dino in ipairs(herd:GetChildren()) do
+                if dino:IsA("Model") and dino.PrimaryPart then
+                    local name = dino.Name
+                    local isUnknown = not NetBridge.knows(name)
+                    
+                    -- Glow ESP для динозавра
+                    if Config.DinoESP and isUnknown and not dino:FindFirstChild("IndexHuntGlow") then
+                        pcall(function()
+                            local hl = Instance.new("Highlight")
+                            hl.Name = "IndexHuntGlow"
+                            hl.FillColor = Color3.fromRGB(255, 215, 0)
+                            hl.FillTransparency = 0.4
+                            hl.OutlineColor = Color3.fromRGB(255, 255, 120)
+                            hl.Adornee = dino
+                            hl.Parent = dino
+                        end)
+                    end
+
+                    local dist = (dino.PrimaryPart.Position - currentHrp.Position).Magnitude
+                    if isUnknown and dist < closestDist then
+                        closestDist = dist
+                        unindexedTarget = dino
+                    end
+                end
+            end
+        end
+
+        -- Рулим к не открытому в Индексе динозавру
+        if unindexedTarget and unindexedTarget.PrimaryPart then
+            local diffX = unindexedTarget.PrimaryPart.Position.X - currentHrp.Position.X
+            RideModule.state.steer = math.clamp(diffX / 15, -1, 1)
             RideModule.state.jumpWanted = true
             pcall(function()
                 VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
                 task.wait(0.05)
                 VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
             end)
+        elseif Config.AutoLeap then
+            -- Стандартный прыжок на ближайшего динозавра
+            RideModule.state.jumpWanted = true
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+            end)
+            RideModule.state.steer = 0
         end
-
-        -- Центрируем управление для удержания на полосе
-        RideModule.state.steer = 0
 
         task.wait(1.5)
     end
 
     -- 9. Завершаем скачку и возвращаемся
-    BotState.RideStatus = "Возврат в хаб..."
+    BotState.RideStatus = "Возврат в хаб и сбор наград..."
     pRideStatus:SetDesc(BotState.RideStatus)
     pcall(function()
         NetBridge.rideEnd("done")
     end)
     task.wait(1.5)
+
+    -- Проверяем новые открытия в Индексе
+    checkAndClaimIndex()
 
     -- 10. Возвращаемся на тренажер
     task.wait(0.5)
@@ -547,7 +746,7 @@ local function startCanyonRide()
 
     safeNotify({
         Title = "Скачки 🦕",
-        Content = "Скачка завершена! Вернулись на тренажер.",
+        Content = "Скачка завершена! Награды собраны, вернулись на тренажер.",
         Duration = 3,
         Icon = "check"
     })
@@ -555,7 +754,7 @@ end
 
 secRide:Toggle({
     Title = "Авто-скачки в каньоне (Auto Ride)",
-    Desc = "Периодические забеги по каньону на динозаврах и драконах",
+    Desc = "Периодические забеги по каньону на драконах и динозаврах",
     Value = Config.AutoRide,
     Callback = function(val)
         Config.AutoRide = val
@@ -569,11 +768,39 @@ secRide:Toggle({
 })
 
 secRide:Toggle({
-    Title = "Авто-приручение (Auto Leap & Tame)",
-    Desc = "Автоматические прыжки на диких драконов и динозавров",
+    Title = "Охота на новых динозавров (Hunt Missing)",
+    Desc = "Приоритет прыжков на мобов, которых еще нет в вашем Индексе",
+    Value = Config.HuntUnindexed,
+    Callback = function(val)
+        Config.HuntUnindexed = val
+    end
+})
+
+secRide:Toggle({
+    Title = "Авто-прыжки и приручение (Auto Leap)",
+    Desc = "Автоматические прыжки на диких мобов во время заезда",
     Value = Config.AutoLeap,
     Callback = function(val)
         Config.AutoLeap = val
+    end
+})
+
+secRide:Toggle({
+    Title = "Авто-сбор наград Индекса (Claim Rewards)",
+    Desc = "Автоматически забирать алмазы и награды за открытые виды",
+    Value = Config.AutoClaimIndex,
+    Callback = function(val)
+        Config.AutoClaimIndex = val
+        if val then checkAndClaimIndex() end
+    end
+})
+
+secRide:Toggle({
+    Title = "Glow ESP на новых динозаврах",
+    Desc = "Золотая подсветка динозавров, которых еще нет в Индексе",
+    Value = Config.DinoESP,
+    Callback = function(val)
+        Config.DinoESP = val
     end
 })
 
@@ -605,7 +832,40 @@ secRide:Button({
     end
 })
 
--- ==================== ВКЛАДКА 3: СТАТИСТИКА ====================
+-- ==================== ВКЛАДКА 3: ВИЗУАЛ & ЧИЛ ====================
+local secVFX = TabVFX:Section({ Title = "Кайфовый неон-визуал и частицы", Opened = true })
+
+secVFX:Toggle({
+    Title = "Космическая Аура и Партиклы (Neon Aura)",
+    Desc = "Фиолетово-бирюзовые неоновые искры и космический туман вокруг персонажа",
+    Value = Config.ChillVisuals,
+    Callback = function(val)
+        Config.ChillVisuals = val
+        applyChillVisuals(val)
+        safeNotify({
+            Title = "Визуал",
+            Content = val and "Неоновая аура активирована!" or "Аура отключена",
+            Duration = 2,
+            Icon = "sparkles"
+        })
+    end
+})
+
+secVFX:Button({
+    Title = "✨ Перезапустить Аура-Эффекты",
+    Desc = "Обновить частицы и световой шлейф персонажа",
+    Callback = function()
+        applyChillVisuals(true)
+        safeNotify({
+            Title = "Визуал",
+            Content = "Эффекты успешно обновлены!",
+            Duration = 2,
+            Icon = "check"
+        })
+    end
+})
+
+-- ==================== ВКЛАДКА 4: СТАТИСТИКА ====================
 local secStats = TabStats:Section({ Title = "Текущие показатели игрока", Opened = true })
 
 local pGrip = secStats:Paragraph({ Title = "Хватка (Grip)", Desc = "Загрузка..." })
@@ -656,10 +916,18 @@ local function updateStatsUI()
             local nextText = price > 0 and (" • След. апгрейд: " .. Format.money(price)) or " • МАКС."
             pPen:SetDesc("Уровень " .. tostring(lvl) .. " (Вместимость: " .. tostring(cap) .. " дино)" .. nextText)
         end
+
+        if IndexModule and IndexModule.state and IndexModule.state.known then
+            local knownCount = 0
+            for _ in pairs(IndexModule.state.known) do
+                knownCount = knownCount + 1
+            end
+            pIndexCount:SetDesc("Открыто видов: " .. tostring(knownCount) .. " / 58")
+        end
     end)
 end
 
--- ==================== ВКЛАДКА 4: НАСТРОЙКИ ====================
+-- ==================== ВКЛАДКА 5: НАСТРОЙКИ ====================
 local secSettings = TabSettings:Section({ Title = "Параметры и темы", Opened = true })
 
 secSettings:Slider({
@@ -691,8 +959,8 @@ secSettings:Slider({
 secSettings:Dropdown({
     Title = "Тема оформления",
     Desc = "Выберите визуальную тему интерфейса",
-    Values = { "Dark", "Rose", "Indigo", "Sky", "Emerald", "Violet" },
-    Value = "Dark",
+    Values = { "Violet", "Indigo", "Dark", "Rose", "Sky", "Emerald" },
+    Value = "Violet",
     Callback = function(themeName)
         WindUI:SetTheme(themeName)
     end
@@ -703,6 +971,7 @@ secSettings:Button({
     Desc = "Полностью закрыть скрипт и очистить интерфейс",
     Callback = function()
         BotState.Running = false
+        applyChillVisuals(false)
         if Window and Window.Destroy then
             Window:Destroy()
         end
@@ -718,21 +987,36 @@ local afkConn = LocalPlayer.Idled:Connect(function()
     end
 end)
 
+-- Авто-восстановление визуала при респавне персонажа
+local charAddedConn = LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1.5)
+    if Config.ChillVisuals then
+        applyChillVisuals(true)
+    end
+end)
+
 -- Очистка при повторной загрузке
 if typeof(STATE) == "table" and STATE.onCleanup then
     STATE.onCleanup(function()
         BotState.Running = false
+        applyChillVisuals(false)
         if afkConn then afkConn:Disconnect() end
+        if charAddedConn then charAddedConn:Disconnect() end
         if Window and Window.Destroy then Window:Destroy() end
     end)
 end
 
+-- Включаем чил-ауру при старте
+if Config.ChillVisuals then
+    applyChillVisuals(true)
+end
+
 -- ==================== ОСНОВНОЙ ЦИКЛ БОТА ====================
 task.spawn(function()
-    print("[Ride A Dino Autofarm | WindUI] Бот успешно запущен!")
+    print("[Ride A Dino Autofarm | Chill Edition] Бот успешно запущен!")
     safeNotify({
         Title = "Ride A Dino! 🦕",
-        Content = "Автофарм запущен! Интерфейс WindUI активен.",
+        Content = "Автофарм запущен в стильном фиолетовом вайбе!",
         Duration = 4,
         Icon = "sparkles"
     })
@@ -799,7 +1083,12 @@ task.spawn(function()
                 end)
             end
 
-            -- Автоскачки в каньоне (если включены)
+            -- Сбор наград Индекса
+            if Config.AutoClaimIndex then
+                checkAndClaimIndex()
+            end
+
+            -- Автоскачки в каньоне (периодический заезд за новыми динозаврами)
             if Config.AutoRide and (now - BotState.LastRide >= Config.RideInterval) then
                 BotState.LastRide = now
                 task.spawn(startCanyonRide)
