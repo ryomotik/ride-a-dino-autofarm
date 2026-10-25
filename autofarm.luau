@@ -46,14 +46,25 @@ local RideModule = require(ClientModules:WaitForChild("Ride"))
 local IndexModule = require(ClientModules:WaitForChild("Index"))
 
 -- Очистка старых окон WindUI
-pcall(function()
-    for _, c in ipairs(game:GetService("CoreGui"):GetChildren()) do
-        if c.Name == "WindUI" or (c.Name == "RobloxGui" and c:FindFirstChild("WindUI")) then
-            local w = c:FindFirstChild("WindUI") or c
-            w:Destroy()
+local function cleanupOldUI()
+    pcall(function()
+        local cg = game:GetService("CoreGui")
+        for _, c in ipairs(cg:GetChildren()) do
+            if c:IsA("ScreenGui") and c.Name:find("WindUI") then
+                c:Destroy()
+            end
         end
-    end
-end)
+        local rg = cg:FindFirstChild("RobloxGui")
+        if rg then
+            for _, c in ipairs(rg:GetChildren()) do
+                if c:IsA("ScreenGui") and c.Name:find("WindUI") then
+                    c:Destroy()
+                end
+            end
+        end
+    end)
+end
+cleanupOldUI()
 
 -- Загрузка UI библиотеки WindUI
 local WindUISuccess, WindUI = pcall(function()
@@ -89,6 +100,8 @@ local Config = {
     AutoClaimIndex = true,    -- Сбор наград Индекса
     DinoESP = true,           -- Подсветка новых/редких динозавров
     ChillVisuals = false,     -- Космическая неон-аура и шлейф (отключено по умолчанию)
+    Theme = "🌸 Sakura Pink (Тянка 1)",
+    BgTransparency = 0.35,
     RideInterval = 120,       -- Интервал между скачками (сек)
     CheckInterval = 2,
 }
@@ -398,22 +411,114 @@ local function checkAndClaimIndex()
     end)
 end
 
+-- ==================== КАСТОМНЫЕ АНИМЕ ТЕМЫ И ФОНЫ ====================
+local GITHUB_RAW_BASE = "https://raw.githubusercontent.com/ryomotik/ride-a-dino-autofarm/main/assets/"
+
+local function getCustomAssetSafe(fileName, url)
+    local assetId = nil
+    pcall(function()
+        if isfile and not isfile(fileName) and url and game.HttpGet then
+            local data = game:HttpGet(url)
+            if data and #data > 0 and writefile then
+                writefile(fileName, data)
+            end
+        end
+        if getcustomasset then
+            assetId = getcustomasset(fileName)
+        end
+    end)
+    return assetId
+end
+
+-- Переменная окна для доступа внутри темы
+local Window = nil
+
+local function getWindowFrame()
+    local cg = game:GetService("CoreGui")
+    local rg = cg:FindFirstChild("RobloxGui") or cg
+    local w = rg:FindFirstChild("WindUI") or cg:FindFirstChild("WindUI")
+    if w then
+        local winFolder = w:FindFirstChild("Window")
+        if winFolder and winFolder:FindFirstChild("Frame") then
+            return winFolder.Frame
+        end
+    end
+    return nil
+end
+
+local function applyCustomTheme(themeKey, transparency)
+    transparency = transparency or Config.BgTransparency or 0.35
+    pcall(function()
+        local frame = getWindowFrame()
+        local bgImg = frame and frame:FindFirstChild("CustomAnimeBg")
+        if not bgImg and frame then
+            bgImg = Instance.new("ImageLabel")
+            bgImg.Name = "CustomAnimeBg"
+            bgImg.Size = UDim2.fromScale(1, 1)
+            bgImg.Position = UDim2.fromScale(0, 0)
+            bgImg.BackgroundTransparency = 1
+            bgImg.ScaleType = Enum.ScaleType.Crop
+            bgImg.ZIndex = 2
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 16)
+            corner.Parent = bgImg
+
+            bgImg.Parent = frame
+        end
+
+        if themeKey == "🌸 Sakura Pink (Тянка 1)" then
+            local asset1 = getCustomAssetSafe("RideADino_anime1.png", GITHUB_RAW_BASE .. "anime1.png")
+            WindUI:SetTheme("Rose")
+            if bgImg then
+                bgImg.Image = asset1 or ""
+                bgImg.ImageTransparency = transparency
+                bgImg.Visible = true
+            end
+        elseif themeKey == "🩸 Crimson Blood (Тянка 2)" then
+            local asset2 = getCustomAssetSafe("RideADino_anime2.jpg", GITHUB_RAW_BASE .. "anime2.jpg")
+            WindUI:SetTheme("Crimson")
+            if bgImg then
+                bgImg.Image = asset2 or ""
+                bgImg.ImageTransparency = transparency
+                bgImg.Visible = true
+            end
+        elseif themeKey == "🖤 Dark Minimal" then
+            WindUI:SetTheme("Dark")
+            if bgImg then
+                bgImg.Visible = false
+            end
+        else
+            WindUI:SetTheme(themeKey)
+            if bgImg then
+                bgImg.Visible = false
+            end
+        end
+    end)
+end
+
 -- ==================== СОЗДАНИЕ ИНТЕРФЕЙСА WINDUI ====================
-local Window = WindUI:CreateWindow({
-    Title = "Ride A Dino! 🦕",
+Window = WindUI:CreateWindow({
+    Title = "Ride A Dino! 🦕 [Anime Edition]",
     Icon = "flame",
-    Author = "by Antigravity • Chill Edition",
+    Author = "by Antigravity & ryomotik",
     Folder = "RideADinoAutofarm",
-    Size = UDim2.fromOffset(630, 530),
-    Theme = "Violet", -- Модный фиолетовый неоновый стиль
+    Size = UDim2.fromOffset(640, 540),
+    Theme = "Rose",
     Transparent = true,
     Resizable = true,
 })
 
+-- Применяем начальную тему и фоновое изображение
+task.spawn(function()
+    task.wait(0.2)
+    applyCustomTheme(Config.Theme, Config.BgTransparency)
+end)
+
 -- Вкладки
 local TabAuto = Window:Tab({ Title = "Автофарм", Icon = "dumbbell" })
 local TabRide = Window:Tab({ Title = "Скачки & Индекс", Icon = "zap" })
-local TabVFX = Window:Tab({ Title = "Визуал & Чил", Icon = "sparkles" })
+local TabVisuals = Window:Tab({ Title = "Стиль & Темы", Icon = "palette" })
 local TabStats = Window:Tab({ Title = "Статистика", Icon = "bar-chart-2" })
 local TabSettings = Window:Tab({ Title = "Настройки", Icon = "settings" })
 
@@ -832,33 +937,75 @@ secRide:Button({
     end
 })
 
--- ==================== ВКЛАДКА 3: ВИЗУАЛ & ЧИЛ ====================
-local secVFX = TabVFX:Section({ Title = "Кайфовый неон-визуал и частицы", Opened = true })
+-- ==================== ВКЛАДКА 3: СТИЛЬ & ТЕМЫ ====================
+local secTheme = TabVisuals:Section({ Title = "Кастомные Аниме Темы и Фоны", Opened = true })
 
-secVFX:Toggle({
-    Title = "Космическая Аура и Партиклы (Neon Aura)",
-    Desc = "Фиолетово-бирюзовые неоновые искры и космический туман вокруг персонажа",
+secTheme:Dropdown({
+    Title = "Тема оформления GUI",
+    Desc = "Выберите визуальный стиль интерфейса",
+    Values = {
+        "🌸 Sakura Pink (Тянка 1)",
+        "🩸 Crimson Blood (Тянка 2)",
+        "🖤 Dark Minimal"
+    },
+    Value = Config.Theme,
+    Callback = function(themeName)
+        Config.Theme = themeName
+        applyCustomTheme(themeName, Config.BgTransparency)
+        safeNotify({
+            Title = "Стиль интерфейса",
+            Content = "Установлена тема: " .. tostring(themeName),
+            Duration = 2,
+            Icon = "palette"
+        })
+    end
+})
+
+secTheme:Slider({
+    Title = "Прозрачность фона (Background Transparency)",
+    Desc = "Яркость аниме арта (10% = яркий арт, 90% = почти прозрачный)",
+    Step = 5,
+    Value = {
+        Min = 10,
+        Max = 90,
+        Default = math.floor(Config.BgTransparency * 100),
+    },
+    Callback = function(val)
+        Config.BgTransparency = val / 100
+        local frame = getWindowFrame()
+        local bgImg = frame and frame:FindFirstChild("CustomAnimeBg")
+        if bgImg then
+            bgImg.ImageTransparency = Config.BgTransparency
+        end
+    end
+})
+
+local secCharacterVFX = TabVisuals:Section({ Title = "Эффекты персонажа (Опционально)", Opened = false })
+
+secCharacterVFX:Toggle({
+    Title = "Космическая Аура и Партиклы",
+    Desc = "Искры и космический туман вокруг персонажа (по умолчанию выключено)",
     Value = Config.ChillVisuals,
     Callback = function(val)
         Config.ChillVisuals = val
         applyChillVisuals(val)
         safeNotify({
-            Title = "Визуал",
-            Content = val and "Неоновая аура активирована!" or "Аура отключена",
+            Title = "Визуал персонажа",
+            Content = val and "Аура активирована!" or "Аура отключена",
             Duration = 2,
             Icon = "sparkles"
         })
     end
 })
 
-secVFX:Button({
-    Title = "✨ Перезапустить Аура-Эффекты",
-    Desc = "Обновить частицы и световой шлейф персонажа",
+secCharacterVFX:Button({
+    Title = "🧹 Очистить эффекты с персонажа",
+    Desc = "Удалить любые партиклы и свечение с персонажа",
     Callback = function()
-        applyChillVisuals(true)
+        applyChillVisuals(false)
         safeNotify({
             Title = "Визуал",
-            Content = "Эффекты успешно обновлены!",
+            Content = "Все эффекты с персонажа удалены!",
             Duration = 2,
             Icon = "check"
         })
@@ -957,12 +1104,22 @@ secSettings:Slider({
 })
 
 secSettings:Dropdown({
-    Title = "Тема оформления",
-    Desc = "Выберите визуальную тему интерфейса",
-    Values = { "Violet", "Indigo", "Dark", "Rose", "Sky", "Emerald" },
-    Value = "Violet",
+    Title = "Быстрая тема (Quick Theme)",
+    Desc = "Переключение стиля оформления",
+    Values = {
+        "🌸 Sakura Pink (Тянка 1)",
+        "🩸 Crimson Blood (Тянка 2)",
+        "🖤 Dark Minimal",
+        "Rose",
+        "Crimson",
+        "Violet",
+        "Dark",
+        "Midnight"
+    },
+    Value = Config.Theme,
     Callback = function(themeName)
-        WindUI:SetTheme(themeName)
+        Config.Theme = themeName
+        applyCustomTheme(themeName, Config.BgTransparency)
     end
 })
 
@@ -1015,10 +1172,10 @@ end
 
 -- ==================== ОСНОВНОЙ ЦИКЛ БОТА ====================
 task.spawn(function()
-    print("[Ride A Dino Autofarm | Chill Edition] Бот успешно запущен!")
+    print("[Ride A Dino Autofarm | Anime Edition] Бот успешно запущен!")
     safeNotify({
-        Title = "Ride A Dino! 🦕",
-        Content = "Автофарм запущен в стильном фиолетовом вайбе!",
+        Title = "Ride A Dino! 🌸",
+        Content = "Автофарм запущен! Стиль: " .. tostring(Config.Theme),
         Duration = 4,
         Icon = "sparkles"
     })
