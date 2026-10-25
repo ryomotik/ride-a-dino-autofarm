@@ -135,6 +135,14 @@ local function teleportToStandAndMount()
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not stand or not hrp then return end
 
+    -- Если оседлан динозавр в хабе, спешиваемся
+    if char:GetAttribute("HubMountSpecies") then
+        pcall(function()
+            NetBridge.equip(2, {slot = nil})
+        end)
+        task.wait(0.4)
+    end
+
     local targetCF = stand:GetPivot()
     if targetCF then
         hrp.CFrame = targetCF * CFrame.new(0, 3, 0)
