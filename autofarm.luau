@@ -113,6 +113,7 @@ local Config = {
     AutoRide = true,          -- Автоскачки в каньоне
     AutoLeap = true,          -- Прыжки на диких мобов
     HuntUnindexed = true,     -- Охота на мобов, которых нет в Индексе
+    PrioritizeRare = true,    -- Приоритет редких видов, гигантов и мутаций
     AutoClaimIndex = true,    -- Сбор наград Индекса
     DinoESP = true,           -- Подсветка новых/редких динозавров
     ChillVisuals = false,     -- Космическая неон-аура и шлейф (отключено по умолчанию)
@@ -473,9 +474,11 @@ local function sendDiscordWebhook(embed)
     end)
 end
 
-local function notifyWebhookTamed(specId, isNew)
+local function notifyWebhookTamed(specId, isNew, size, mutation)
     if not Config.WebhookOnTame then return end
     pcall(function()
+        size = size or "Normal"
+        mutation = mutation or "None"
         local stats = NetBridge.stats()
         local pen = NetBridge.pen()
         local knownCount = 0
@@ -487,21 +490,50 @@ local function notifyWebhookTamed(specId, isNew)
         local moneyText = stats and Format.money(stats.dollars or 0) or "$0"
         local incomeText = pen and (Format.money(pen.income or 0) .. "/сек") or "$0/сек"
 
-        local title = isNew and ("🎉 ОТКРЫТ НОВЫЙ ВИД: " .. tostring(specId) .. "!") or ("💖 Приручен: " .. tostring(specId))
-        local color = isNew and 0xFFD700 or 0xFF69B4
+        local tag = ""
+        if mutation ~= "None" and mutation ~= "" then
+            tag = " [" .. mutation .. "]"
+        end
+        if size ~= "Normal" and size ~= "" then
+            tag = tag .. " (" .. size .. ")"
+        end
+
+        local title = ""
+        local color = 0xFF69B4
+        if isNew then
+            title = "🎉 ОТКРЫТ НОВЫЙ ВИД: " .. tostring(specId) .. tag .. "!"
+            color = 0xFFD700
+        elseif mutation == "Rainbow" or mutation == "Golden" then
+            title = "🌟 ЛЕГЕНДАРНАЯ МУТАЦИЯ: " .. tostring(specId) .. tag .. "!"
+            color = 0xFFD700
+        elseif size == "Colossal" or size == "Huge" or size == "Giant" then
+            title = "👑 ГИГАНТСКИЙ ДИНОЗАВР: " .. tostring(specId) .. tag .. "!"
+            color = 0xBA55D3
+        elseif mutation == "Silver" then
+            title = "✨ СЕРЕБРЯНЫЙ ДИНОЗАВР: " .. tostring(specId) .. tag .. "!"
+            color = 0xC0C0C0
+        else
+            title = "💖 Приручен: " .. tostring(specId) .. tag
+        end
+
+        local desc = isNew and "🦖 Новый динозавр добавлен в ваш Индекс!" or "🦕 Динозавр успешно оседлан и приручен на 100%!"
+
+        local fields = {
+            { name = "🦕 Вид", value = "`" .. tostring(specId) .. "`", inline = true },
+            { name = "📏 Размер", value = "`" .. tostring(size) .. "`", inline = true },
+            { name = "🧬 Мутация", value = "`" .. tostring(mutation) .. "`", inline = true },
+            { name = "📖 Индекс", value = string.format("`%d / 58`", knownCount), inline = true },
+            { name = "💰 Баланс", value = moneyText, inline = true },
+            { name = "💪 Хватка (Grip)", value = gripText, inline = true },
+            { name = "📈 Доход загона", value = incomeText, inline = true },
+            { name = "🎮 Игрок", value = LocalPlayer.Name, inline = true },
+        }
 
         local embed = {
             title = title,
-            description = isNew and "🦖 Новый динозавр добавлен в ваш Индекс!" or "🦕 Динозавр успешно оседлан и приручен на 100%!",
+            description = desc,
             color = color,
-            fields = {
-                { name = "🦕 Вид", value = "`" .. tostring(specId) .. "`", inline = true },
-                { name = "📖 Индекс", value = string.format("`%d / 58`", knownCount), inline = true },
-                { name = "💰 Баланс", value = moneyText, inline = true },
-                { name = "💪 Хватка (Grip)", value = gripText, inline = true },
-                { name = "📈 Доход загона", value = incomeText, inline = true },
-                { name = "🎮 Игрок", value = LocalPlayer.Name, inline = true },
-            },
+            fields = fields,
             footer = {
                 text = "Ride A Dino! • Anime Minimalist Edition"
             },
@@ -847,9 +879,93 @@ secToggles:Toggle({
     end
 })
 
+secToggles:Toggle({
+    Title = "👑 Приоритет редких видов (Rare Prioritize)",
+    Desc = "Охота на редких драконов, мутации (Rainbow, Golden, Silver) и гигантов (Colossal, Giant)",
+    Value = Config.PrioritizeRare,
+    Callback = function(val)
+        Config.PrioritizeRare = val
+    end
+})
+
 local secRideInfo = TabFarm:Section({ Title = "Текущий Заезд в Каньоне", Opened = true })
 local pRideStatus = secRideInfo:Paragraph({ Title = "Статус скачек", Desc = "В ожидании (готов к заезду)" })
 local pTameProgress = secRideInfo:Paragraph({ Title = "Шкала приручения (Розовая шкала)", Desc = "Ожидание заезда (0%)" })
+
+-- Оценка ценности и редкости динозавра
+local function getDinoRarity(dino, playerGrip)
+    if not (dino and dino:IsA("Model")) then
+        return 0, false, "Normal", "None", 20, Color3.fromRGB(255, 255, 255), false, "Unknown"
+    end
+
+    local specId = dino:GetAttribute("SpecId") or dino.Name
+    local size = dino:GetAttribute("Size") or "Normal"
+    local mutation = dino:GetAttribute("Mutation") or "None"
+
+    local reqGrip = 20
+    pcall(function()
+        if TameConfig and TameConfig.gate then
+            reqGrip = TameConfig.gate(specId) or TameConfig.gate(dino.Name) or 20
+        elseif TameConfig and TameConfig.GATE then
+            reqGrip = TameConfig.GATE[specId] or TameConfig.GATE[dino.Name] or 20
+        end
+    end)
+
+    -- Базовый балл вида на основе требований к энергии (Grip)
+    local speciesScore = math.floor(math.log10(math.max(10, reqGrip)) * 100)
+
+    -- Множитель размера
+    local sizeMult = 1.0
+    if size == "Colossal" then
+        sizeMult = 5.0
+    elseif size == "Huge" then
+        sizeMult = 3.5
+    elseif size == "Giant" then
+        sizeMult = 2.5
+    elseif size == "Big" then
+        sizeMult = 1.4
+    elseif size == "Tiny" then
+        sizeMult = 0.7
+    end
+
+    -- Множитель мутации
+    local mutMult = 1.0
+    if mutation == "Rainbow" then
+        mutMult = 8.0
+    elseif mutation == "Golden" then
+        mutMult = 5.0
+    elseif mutation == "Spectral" or mutation == "Magma" or mutation == "Mummified" or mutation == "Void" or mutation == "Electric" then
+        mutMult = 4.0
+    elseif mutation == "Silver" then
+        mutMult = 2.5
+    elseif mutation ~= "None" and mutation ~= "" then
+        mutMult = 2.0
+    end
+
+    local isUnknown = not NetBridge.knows(specId)
+    local indexBonus = (Config.HuntUnindexed and isUnknown) and 3500 or 0
+
+    local totalScore = math.floor((speciesScore * sizeMult * mutMult) + indexBonus)
+
+    -- Цвет для ESP и интерфейса
+    local espColor = Color3.fromRGB(255, 255, 255)
+    local isSpecial = false
+    if mutation == "Rainbow" or mutation == "Golden" then
+        espColor = Color3.fromRGB(255, 215, 0)
+        isSpecial = true
+    elseif size == "Colossal" or size == "Huge" or size == "Giant" then
+        espColor = Color3.fromRGB(186, 85, 211)
+        isSpecial = true
+    elseif mutation == "Silver" then
+        espColor = Color3.fromRGB(192, 215, 255)
+        isSpecial = true
+    elseif isUnknown then
+        espColor = Color3.fromRGB(255, 215, 0)
+        isSpecial = true
+    end
+
+    return totalScore, isSpecial, size, mutation, reqGrip, espColor, isUnknown, specId
+end
 
 -- Логика скачки по каньону: пробег через все доступные по энергии локации
 startCanyonRide = function()
@@ -1004,22 +1120,35 @@ startCanyonRide = function()
 
         -- ========== СОСТОЯНИЕ 3: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН! ==========
         if isTamed and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
+            local currentSize = TameModule.state.size or "Normal"
+            local currentMut = TameModule.state.mutation or "None"
             local isNew = not NetBridge.knows(currentSpec)
             lastTamedSpec = currentSpec
             safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
+
+            local notifTitle = "Приручен! 🎉"
+            if currentMut ~= "None" and currentMut ~= "" then
+                notifTitle = "🌟 Приручен [" .. currentMut .. "]!"
+            elseif currentSize == "Colossal" or currentSize == "Huge" or currentSize == "Giant" then
+                notifTitle = "👑 Приручен (" .. currentSize .. ")!"
+            end
+
             safeNotify({
-                Title = "Приручен! 🎉",
-                Content = "Новый вид: " .. tostring(currentSpec) .. " добавлен в коллекцию!",
+                Title = notifTitle,
+                Content = string.format("%s %s %s", tostring(currentSpec), currentMut ~= "None" and ("[" .. currentMut .. "]") or "", currentSize ~= "Normal" and ("(" .. currentSize .. ")") or ""),
                 Duration = 3,
                 Icon = "heart"
             })
             checkAndClaimIndex()
-            notifyWebhookTamed(currentSpec, isNew)
+            notifyWebhookTamed(currentSpec, isNew, currentSize, currentMut)
         end
 
-        -- ========== СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА ПО УРОВНЮ ЭНЕРГИИ ==========
+        -- ========== СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА ПО УРОВНЮ ЭНЕРГИИ И РЕДКОСТИ ==========
         local bestTarget = nil
         local bestDist = 180
+        local bestScore = -1
+        local targetName = ""
+        local targetTags = ""
         local targetIsUnindexed = false
 
         local herd = workspace:FindFirstChild("StampedeHerd")
@@ -1030,47 +1159,74 @@ startCanyonRide = function()
                     local dPos = dino.PrimaryPart.Position
                     local dz = dPos.Z - myPos.Z
                     -- Берём только тех, кто впереди нас по каньону
-                    if dz > 3 and dz < 150 then
-                        local name = dino.Name
+                    if dz > 3 and dz < 155 then
+                        local score, isSpecial, size, mut, reqGrip, espColor, isUnknown, specId = getDinoRarity(dino, playerGrip)
 
                         -- ПРОВЕРКА ЭНЕРГИИ (GRIP GATE):
                         -- Прыгаем ТОЛЬКО на тех, кого позволяет оседлать наша энергия!
-                        local reqGrip = 20
-                        pcall(function()
-                            if TameConfig and TameConfig.gate then
-                                reqGrip = TameConfig.gate(name) or 20
-                            elseif TameConfig and TameConfig.GATE and TameConfig.GATE[name] then
-                                reqGrip = TameConfig.GATE[name]
-                            end
-                        end)
-
                         if reqGrip <= playerGrip then
                             local dist = (dPos - myPos).Magnitude
-                            local isUnknown = not NetBridge.knows(name)
 
-                            -- Золотая подсветка для ещё не открытых видов
-                            if Config.DinoESP and isUnknown and not dino:FindFirstChild("IndexHuntGlow") then
-                                pcall(function()
-                                    local hl = Instance.new("Highlight")
-                                    hl.Name = "IndexHuntGlow"
-                                    hl.FillColor = Color3.fromRGB(255, 215, 0)
-                                    hl.FillTransparency = 0.4
-                                    hl.OutlineColor = Color3.fromRGB(255, 255, 120)
-                                    hl.Adornee = dino
-                                    hl.Parent = dino
-                                end)
+                            -- Многоцветная неоновая подсветка (ESP) для редких, гигантов, мутаций и неизвестных
+                            if Config.DinoESP and isSpecial then
+                                local hl = dino:FindFirstChild("DinoRarityGlow")
+                                if not hl then
+                                    pcall(function()
+                                        local newHl = Instance.new("Highlight")
+                                        newHl.Name = "DinoRarityGlow"
+                                        newHl.FillColor = espColor
+                                        newHl.FillTransparency = 0.35
+                                        newHl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                                        newHl.OutlineTransparency = 0.1
+                                        newHl.Adornee = dino
+                                        newHl.Parent = dino
+                                    end)
+                                end
                             end
 
-                            if Config.HuntUnindexed and isUnknown then
-                                if not targetIsUnindexed or dist < bestDist then
-                                    bestTarget = dino
-                                    bestDist = dist
-                                    targetIsUnindexed = true
+                            -- ВЫБОР ЦЕЛИ С УЧЕТОМ ПРИОРИТЕТА РЕДКОСТИ:
+                            if Config.PrioritizeRare then
+                                local isBetter = false
+                                if not bestTarget then
+                                    isBetter = true
+                                elseif score > bestScore * 1.15 then
+                                    -- Значительно более редкий вид/мутация/гигант -> выбираем его!
+                                    isBetter = true
+                                elseif score >= bestScore * 0.85 and dist < bestDist then
+                                    -- Примерно одинаковая редкость, но этот ближе -> выбираем более близкого
+                                    isBetter = true
                                 end
-                            elseif not targetIsUnindexed and Config.AutoLeap then
-                                if dist < bestDist then
+
+                                if isBetter then
                                     bestTarget = dino
                                     bestDist = dist
+                                    bestScore = score
+                                    targetName = dino.Name
+                                    targetIsUnindexed = isUnknown
+                                    local tagParts = {}
+                                    if mut ~= "None" and mut ~= "" then table.insert(tagParts, mut) end
+                                    if size ~= "Normal" and size ~= "" then table.insert(tagParts, size) end
+                                    if isUnknown then table.insert(tagParts, "NEW") end
+                                    targetTags = #tagParts > 0 and ("[" .. table.concat(tagParts, ", ") .. "]") or ""
+                                end
+                            else
+                                if Config.HuntUnindexed and isUnknown then
+                                    if not targetIsUnindexed or dist < bestDist then
+                                        bestTarget = dino
+                                        bestDist = dist
+                                        bestScore = score
+                                        targetName = dino.Name
+                                        targetTags = "[NEW]"
+                                        targetIsUnindexed = true
+                                    end
+                                elseif not targetIsUnindexed and Config.AutoLeap then
+                                    if dist < bestDist then
+                                        bestTarget = dino
+                                        bestDist = dist
+                                        bestScore = score
+                                        targetName = dino.Name
+                                        targetTags = ""
+                                    end
                                 end
                             end
                         end
@@ -1090,7 +1246,7 @@ startCanyonRide = function()
                 RideModule.state.steer = math.clamp(diffX / 12, -1, 1)
             end
 
-            local statusDesc = targetIsUnindexed and ("🎯 Охота на НОВОГО: " .. bestTarget.Name) or ("Цель: " .. bestTarget.Name)
+            local statusDesc = targetTags ~= "" and string.format("Цель: %s %s", targetName, targetTags) or ("Цель: " .. targetName)
             BotState.RideStatus = string.format("[%s • %dm] %s (дист. %.0fm)", zoneName, distanceM, statusDesc, bestDist)
             safeSetDesc(pRideStatus, BotState.RideStatus)
 
@@ -1098,7 +1254,7 @@ startCanyonRide = function()
             -- Иначе прыгаем при дистанции <= 75 или при сбросе (angryLeft <= 3.5)
             local shouldJump = false
             if isTamed then
-                shouldJump = (bestDist <= 80) or (bestDist <= 115 and math.abs(diffX) <= 30)
+                shouldJump = (bestDist <= 85) or (bestDist <= 120 and math.abs(diffX) <= 32)
             else
                 shouldJump = (bestDist <= 75 and math.abs(diffX) <= 22) or (angryLeft > 0 and angryLeft <= 3.5) or (tameMode == "warn")
             end
