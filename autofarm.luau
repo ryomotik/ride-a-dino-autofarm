@@ -24,6 +24,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+
+local httpRequest = (syn and syn.request) or (http and http.request) or http_request or (Fluxus and Fluxus.request) or request
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -115,6 +118,12 @@ local Config = {
     BgTransparency = 0.35,
     RideInterval = 60,        -- Интервал между скачками (сек)
     CheckInterval = 2,
+    ToggleKey = "RightControl",       -- Клавиша открытия/скрытия меню
+    ToggleKeyCode = Enum.KeyCode.RightControl,
+    DiscordWebhook = "",              -- URL вебхука Discord
+    WebhookOnTame = true,             -- Уведомления о приручении динозавров
+    WebhookPeriodic = false,          -- Периодический отчет (каждые 15 минут)
+    WebhookInterval = 900,            -- 15 минут в секундах
 }
 
 local BotState = {
@@ -124,6 +133,7 @@ local BotState = {
     LastClaim = 0,
     LastAuraCheck = 0,
     LastRide = 0,
+    LastWebhookReport = 0,
     RideStatus = "В ожидании",
 }
 
@@ -431,6 +441,136 @@ local function checkAndClaimIndex()
 end
 
 -- ==================== КАСТОМНЫЕ АНИМЕ ТЕМЫ И ФОНЫ ====================
+
+-- ==================== ДИСКОРД ВЕБХУК (DISCORD WEBHOOK) ====================
+local function sendDiscordWebhook(embed)
+    if not Config.DiscordWebhook or Config.DiscordWebhook == "" or not Config.DiscordWebhook:find("http") then
+        return
+    end
+
+    task.spawn(function()
+        pcall(function()
+            if not httpRequest then return end
+
+            local payload = {
+                username = "Ride A Dino! Bot 🦕",
+                avatar_url = "https://raw.githubusercontent.com/ryomotik/ride-a-dino-autofarm/main/assets/anime1.png",
+                embeds = { embed }
+            }
+
+            local json = HttpService:JSONEncode(payload)
+            httpRequest({
+                Url = Config.DiscordWebhook,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = json
+            })
+        end)
+    end)
+end
+
+local function notifyWebhookTamed(specId, isNew)
+    if not Config.WebhookOnTame then return end
+    pcall(function()
+        local stats = NetBridge.stats()
+        local pen = NetBridge.pen()
+        local knownCount = 0
+        if IndexModule and IndexModule.state and IndexModule.state.known then
+            for _ in pairs(IndexModule.state.known) do knownCount = knownCount + 1 end
+        end
+
+        local gripText = stats and Format.abbreviate(stats.grip or 0) or "0"
+        local moneyText = stats and Format.money(stats.dollars or 0) or "$0"
+        local incomeText = pen and (Format.money(pen.income or 0) .. "/сек") or "$0/сек"
+
+        local title = isNew and ("🎉 ОТКРЫТ НОВЫЙ ВИД: " .. tostring(specId) .. "!") or ("💖 Приручен: " .. tostring(specId))
+        local color = isNew and 0xFFD700 or 0xFF69B4
+
+        local embed = {
+            title = title,
+            description = isNew and "🦖 Новый динозавр добавлен в ваш Индекс!" or "🦕 Динозавр успешно оседлан и приручен на 100%!",
+            color = color,
+            fields = {
+                { name = "🦕 Вид", value = "`" .. tostring(specId) .. "`", inline = true },
+                { name = "📖 Индекс", value = string.format("`%d / 58`", knownCount), inline = true },
+                { name = "💰 Баланс", value = moneyText, inline = true },
+                { name = "💪 Хватка (Grip)", value = gripText, inline = true },
+                { name = "📈 Доход загона", value = incomeText, inline = true },
+                { name = "🎮 Игрок", value = LocalPlayer.Name, inline = true },
+            },
+            footer = {
+                text = "Ride A Dino! • Anime Minimalist Edition"
+            },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }
+        sendDiscordWebhook(embed)
+    end)
+end
+
+local function sendStatsWebhookReport(isTest)
+    pcall(function()
+        local stats = NetBridge.stats()
+        local loadout = NetBridge.loadout()
+        local pen = NetBridge.pen()
+        local aura = NetBridge.state.aura
+        local penInstance = getMyPen()
+
+        local gripText = stats and Format.abbreviate(stats.grip or 0) or "0"
+        local moneyText = stats and Format.money(stats.dollars or 0) or "$0"
+        local incomeText = pen and (Format.money(pen.income or 0) .. "/сек") or "$0/сек"
+
+        local auraStr = "Нет"
+        if aura and aura.equipped then
+            local auraData = Training.Auras[aura.equipped]
+            local mult = auraData and auraData.gripMult or 1
+            auraStr = tostring(aura.equipped):upper() .. " (x" .. tostring(mult) .. ")"
+        end
+
+        local machineStr = "Tier 1"
+        if loadout then
+            local tier = loadout.tier or 1
+            local tierData = Gear.Tiers[tier]
+            machineStr = tierData and tierData.name or ("Tier " .. tostring(tier))
+        end
+
+        local penStr = "Ур. 1"
+        if penInstance then
+            local lvl = penInstance:GetAttribute("Level") or 1
+            local cap = (pen and pen.capacity) or "?"
+            penStr = "Ур. " .. tostring(lvl) .. " (макс " .. tostring(cap) .. " дино)"
+        end
+
+        local knownCount = 0
+        if IndexModule and IndexModule.state and IndexModule.state.known then
+            for _ in pairs(IndexModule.state.known) do knownCount = knownCount + 1 end
+        end
+
+        local title = isTest and "🧪 Тестовый отчет вебхука" or "📊 Периодический отчет фарма"
+        local embed = {
+            title = title,
+            description = isTest and "Связь с Discord вебхуком успешно установлена! ✅" or "Текущий прогресс и статистика автофарма в игре Ride A Dino!",
+            color = isTest and 0x5865F2 or 0x00F0FF,
+            fields = {
+                { name = "🎮 Игрок", value = LocalPlayer.Name, inline = true },
+                { name = "💪 Хватка (Grip)", value = gripText, inline = true },
+                { name = "💰 Баланс", value = moneyText, inline = true },
+                { name = "📈 Доход загона", value = incomeText, inline = true },
+                { name = "⚡ Аура", value = auraStr, inline = true },
+                { name = "🏋️ Машина", value = machineStr, inline = true },
+                { name = "🏡 Загон", value = penStr, inline = true },
+                { name = "📖 Индекс", value = string.format("`%d / 58`", knownCount), inline = true },
+            },
+            footer = {
+                text = "Ride A Dino! • Anime Minimalist Edition"
+            },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }
+        sendDiscordWebhook(embed)
+    end)
+end
+
 -- ==================== ЭКИПИРОВКА ЛУЧШЕГО (EQUIP BEST) ====================
 local function equipBest()
     task.spawn(function()
@@ -613,6 +753,13 @@ Window = WindUI:CreateWindow({
     Transparent = true,
     Resizable = true,
 })
+
+-- Устанавливаем клавишу скрытия/открытия меню
+pcall(function()
+    if Window and Window.SetToggleKey then
+        Window:SetToggleKey(Config.ToggleKeyCode)
+    end
+end)
 
 -- Применяем начальную тему и фоновое изображение
 task.spawn(function()
@@ -836,6 +983,7 @@ startCanyonRide = function()
 
         -- ========== СОСТОЯНИЕ 3: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН! ==========
         if isTamed and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
+            local isNew = not NetBridge.knows(currentSpec)
             lastTamedSpec = currentSpec
             safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
             safeNotify({
@@ -845,6 +993,7 @@ startCanyonRide = function()
                 Icon = "heart"
             })
             checkAndClaimIndex()
+            notifyWebhookTamed(currentSpec, isNew)
         end
 
         -- ========== СОСТОЯНИЕ 4: МГНОВЕННЫЙ ПЕРЕСКОК НА НОВОГО ДИНОЗАВРА ==========
@@ -1043,7 +1192,31 @@ local pStatsOverview = secStats:Paragraph({
     Desc = "Загрузка данных..."
 })
 
-local secSettings = TabStats:Section({ Title = "Параметры", Opened = true })
+local secSettings = TabStats:Section({ Title = "Параметры & Бинд", Opened = true })
+
+secSettings:Keybind({
+    Title = "Бинд открытия меню",
+    Desc = "Клавиша для скрытия и показа меню (по умолчанию RightControl)",
+    Value = Config.ToggleKey,
+    Callback = function(key)
+        pcall(function()
+            local code = typeof(key) == "EnumItem" and key or Enum.KeyCode[key]
+            if code then
+                Config.ToggleKeyCode = code
+                Config.ToggleKey = typeof(key) == "string" and key or key.Name
+                if Window and Window.SetToggleKey then
+                    Window:SetToggleKey(code)
+                end
+                safeNotify({
+                    Title = "Бинд меню ⌨️",
+                    Content = "Клавиша открытия: " .. tostring(Config.ToggleKey),
+                    Duration = 2,
+                    Icon = "keyboard"
+                })
+            end
+        end)
+    end
+})
 
 secSettings:Slider({
     Title = "Интервал авто-скачек (сек)",
@@ -1067,6 +1240,67 @@ secSettings:Button({
         if Window and Window.Destroy then
             Window:Destroy()
         end
+    end
+})
+
+local secWebhook = TabStats:Section({ Title = "Дискорд Вебхук (Discord Webhook)", Opened = true })
+
+secWebhook:Input({
+    Title = "URL Вебхука (Webhook URL)",
+    Desc = "Вставьте ссылку на ваш Discord Webhook",
+    Value = Config.DiscordWebhook,
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(text)
+        Config.DiscordWebhook = text:gsub("%s+", "")
+        if Config.DiscordWebhook ~= "" and Config.DiscordWebhook:find("http") then
+            safeNotify({
+                Title = "Discord Webhook 📡",
+                Content = "Вебхук успешно сохранен!",
+                Duration = 2,
+                Icon = "check"
+            })
+        end
+    end
+})
+
+secWebhook:Toggle({
+    Title = "Оповещения о приручении (Tame Alerts)",
+    Desc = "Отправлять уведомление в Discord при приручении динозавра",
+    Value = Config.WebhookOnTame,
+    Callback = function(val)
+        Config.WebhookOnTame = val
+    end
+})
+
+secWebhook:Toggle({
+    Title = "Периодический отчет (Report каждые 15м)",
+    Desc = "Отправлять сводку баланса и хвата каждые 15 минут",
+    Value = Config.WebhookPeriodic,
+    Callback = function(val)
+        Config.WebhookPeriodic = val
+    end
+})
+
+secWebhook:Button({
+    Title = "🧪 Проверить вебхук (Отправить тест)",
+    Desc = "Отправить тестовое сообщение со статистикой в Discord",
+    Callback = function()
+        if not Config.DiscordWebhook or Config.DiscordWebhook == "" or not Config.DiscordWebhook:find("http") then
+            safeNotify({
+                Title = "Ошибка вебхука ⚠️",
+                Content = "Сначала укажите корректную ссылку на Discord Webhook!",
+                Duration = 3,
+                Icon = "alert-triangle"
+            })
+            return
+        end
+        sendStatsWebhookReport(true)
+        safeNotify({
+            Title = "Тест отправлен! 🚀",
+            Content = "Проверьте ваш Discord канал!",
+            Duration = 3,
+            Icon = "send"
+        })
     end
 })
 
@@ -1128,6 +1362,22 @@ local function updateStatsUI()
     end)
 end
 
+-- Обработчик клавиши открытия меню (фоллбэк)
+local toggleConn = UserInputService.InputBegan:Connect(function(input, gpe)
+    if not gpe and input.KeyCode == Config.ToggleKeyCode then
+        pcall(function()
+            if Window and Window.Toggle then
+                Window:Toggle()
+                return
+            end
+            local frame = getWindowFrame()
+            if frame then
+                frame.Visible = not frame.Visible
+            end
+        end)
+    end
+end)
+
 -- Защита Anti-AFK
 local afkConn = LocalPlayer.Idled:Connect(function()
     if Config.AntiAFK then
@@ -1150,6 +1400,7 @@ if typeof(STATE) == "table" and STATE.onCleanup then
     STATE.onCleanup(function()
         BotState.Running = false
         applyChillVisuals(false)
+        if toggleConn then toggleConn:Disconnect() end
         if afkConn then afkConn:Disconnect() end
         if charAddedConn then charAddedConn:Disconnect() end
         if Window and Window.Destroy then Window:Destroy() end
@@ -1244,6 +1495,12 @@ task.spawn(function()
             if Config.AutoRide and (now - BotState.LastRide >= Config.RideInterval) then
                 BotState.LastRide = now
                 task.spawn(startCanyonRide)
+            end
+
+            -- Периодический отчет в Discord (каждые 15 минут)
+            if Config.WebhookPeriodic and Config.DiscordWebhook ~= "" and (now - BotState.LastWebhookReport >= Config.WebhookInterval) then
+                BotState.LastWebhookReport = now
+                sendStatsWebhookReport(false)
             end
         end
 
