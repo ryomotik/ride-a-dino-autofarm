@@ -830,11 +830,11 @@ secFast:Button({
     end
 })
 
-local secToggles = TabFarm:Section({ Title = "Автоматизация", Opened = true })
+local secToggles = TabFarm:Section({ Title = "Автоматизация (Минимализм)", Opened = true })
 
 secToggles:Toggle({
-    Title = "🔥 Полный автофарм базы (Base Auto)",
-    Desc = "Хватка, тренажеры, загон, ауры, награды и Anti-AFK",
+    Title = "🧠 1000+ IQ Автофарм базы (Base Genius Auto)",
+    Desc = "Хватка, авто-тренажеры, авто-загон, авто-ауры, подарки и Anti-AFK",
     Value = Config.AutoTrain,
     Callback = function(val)
         Config.AutoTrain = val
@@ -847,7 +847,7 @@ secToggles:Toggle({
         end
         safeNotify({
             Title = "Автофарм базы",
-            Content = val and "Полный автофарм базы включен! 🚀" or "Автофарм выключен",
+            Content = val and "1000+ IQ автофарм базы включен! 🚀" or "Автофарм выключен",
             Duration = 2,
             Icon = "zap"
         })
@@ -855,36 +855,20 @@ secToggles:Toggle({
 })
 
 secToggles:Toggle({
-    Title = "🦕 Авто-скачки и Приручение (Canyon Ride)",
-    Desc = "Периодические забеги по каньону и быстрое приручение",
+    Title = "👑 1000+ IQ Скачки и Охота на редких (Canyon & Rare Rider)",
+    Desc = "Умный автопилот, приоритет редких драконов, мутаций, гигантов и руление A/D",
     Value = Config.AutoRide,
     Callback = function(val)
         Config.AutoRide = val
         Config.AutoLeap = val
+        Config.HuntUnindexed = val
+        Config.PrioritizeRare = val
         safeNotify({
             Title = "Скачки в каньоне",
-            Content = val and "Авто-скачки и приручение включены!" or "Авто-скачки выключены",
+            Content = val and "1000+ IQ скачки и охота на редких включены! 👑" or "Скачки выключены",
             Duration = 2,
             Icon = "zap"
         })
-    end
-})
-
-secToggles:Toggle({
-    Title = "🎯 Охота на новых видов (Index Hunt)",
-    Desc = "Приоритет динозавров, которых еще нет в вашем Индексе",
-    Value = Config.HuntUnindexed,
-    Callback = function(val)
-        Config.HuntUnindexed = val
-    end
-})
-
-secToggles:Toggle({
-    Title = "👑 Приоритет редких видов (Rare Prioritize)",
-    Desc = "Охота на редких драконов, мутации (Rainbow, Golden, Silver) и гигантов (Colossal, Giant)",
-    Value = Config.PrioritizeRare,
-    Callback = function(val)
-        Config.PrioritizeRare = val
     end
 })
 
@@ -911,8 +895,8 @@ local function getDinoRarity(dino, playerGrip)
         end
     end)
 
-    -- Базовый балл вида на основе требований к энергии (Grip)
-    local speciesScore = math.floor(math.log10(math.max(10, reqGrip)) * 100)
+    -- Базовый балл вида на основе требований к энергии (Grip Gate)
+    local baseScore = math.floor(math.log10(math.max(10, reqGrip)) * 120)
 
     -- Множитель размера
     local sizeMult = 1.0
@@ -931,21 +915,21 @@ local function getDinoRarity(dino, playerGrip)
     -- Множитель мутации
     local mutMult = 1.0
     if mutation == "Rainbow" then
-        mutMult = 8.0
+        mutMult = 10.0
     elseif mutation == "Golden" then
-        mutMult = 5.0
-    elseif mutation == "Spectral" or mutation == "Magma" or mutation == "Mummified" or mutation == "Void" or mutation == "Electric" then
-        mutMult = 4.0
-    elseif mutation == "Silver" then
-        mutMult = 2.5
+        mutMult = 6.0
+    elseif mutation == "Spectral" or mutation == "Magma" or mutation == "Void" or mutation == "Electric" then
+        mutMult = 4.5
+    elseif mutation == "Mummified" or mutation == "Silver" then
+        mutMult = 3.0
     elseif mutation ~= "None" and mutation ~= "" then
-        mutMult = 2.0
+        mutMult = 2.2
     end
 
     local isUnknown = not NetBridge.knows(specId)
-    local indexBonus = (Config.HuntUnindexed and isUnknown) and 3500 or 0
+    local unindexedBonus = isUnknown and 6000 or 0
 
-    local totalScore = math.floor((speciesScore * sizeMult * mutMult) + indexBonus)
+    local totalScore = math.floor((baseScore * sizeMult * mutMult) + unindexedBonus)
 
     -- Цвет для ESP и интерфейса
     local espColor = Color3.fromRGB(255, 255, 255)
@@ -956,8 +940,8 @@ local function getDinoRarity(dino, playerGrip)
     elseif size == "Colossal" or size == "Huge" or size == "Giant" then
         espColor = Color3.fromRGB(186, 85, 211)
         isSpecial = true
-    elseif mutation == "Silver" then
-        espColor = Color3.fromRGB(192, 215, 255)
+    elseif mutation == "Silver" or mutation == "Spectral" then
+        espColor = Color3.fromRGB(160, 220, 255)
         isSpecial = true
     elseif isUnknown then
         espColor = Color3.fromRGB(255, 215, 0)
@@ -967,21 +951,21 @@ local function getDinoRarity(dino, playerGrip)
     return totalScore, isSpecial, size, mutation, reqGrip, espColor, isUnknown, specId
 end
 
--- Логика скачки по каньону: пробег через все доступные по энергии локации
+-- 1000+ IQ Логика скачки по каньону
 startCanyonRide = function()
     if BotState.IsRiding then return end
     BotState.IsRiding = true
-    BotState.RideStatus = "Подготовка к заезду..."
+    BotState.RideStatus = "Подготовка к заезду 1000+ IQ..."
     safeSetDesc(pRideStatus, BotState.RideStatus)
 
     safeNotify({
-        Title = "Скачки 🦕",
-        Content = "Запуск заезда через локации каньона...",
+        Title = "Скачки 1000+ IQ 🦕",
+        Content = "Запуск заезда в каньон...",
         Duration = 3,
         Icon = "zap"
     })
 
-    -- 1. Спешиваемся если на тренажере
+    -- 1. Спешиваемся с тренажера
     if isPlayerOnMachine() then
         pcall(function()
             VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
@@ -989,14 +973,14 @@ startCanyonRide = function()
             VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
         end)
         NetBridge.machineDismount("jump")
-        task.wait(0.5)
+        task.wait(0.4)
     end
 
     -- 2. Спешиваемся с хаб-маунта если есть
     pcall(function()
         if LocalPlayer.Character and LocalPlayer.Character:GetAttribute("HubMountSpecies") then
             NetBridge.equip(2, {slot = nil})
-            task.wait(0.4)
+            task.wait(0.3)
         end
     end)
 
@@ -1004,52 +988,45 @@ startCanyonRide = function()
     pcall(function()
         NetBridge.equip(2, {slot = 2})
     end)
-    task.wait(0.6)
+    task.wait(0.4)
 
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not (hrp and hum) then
         BotState.IsRiding = false
         BotState.RideStatus = "Ошибка: персонаж не найден"
         safeSetDesc(pRideStatus, BotState.RideStatus)
         return
     end
 
-    -- 4. Телепортируемся на StartZonePad (рампа в начале каньона)
-    local startX = Track.CENTRE_X or 41.38
-    local startZ = Track.Z0 or -196.37
-    local spawnCF = CFrame.new(startX, 27, startZ + 15)
-
-    -- Пробуем телепорт несколько раз (сервер иногда реджектит)
-    for attempt = 1, 3 do
-        hrp.CFrame = spawnCF
-        task.wait(0.35)
-        local newPos = hrp.Position
-        -- Если телепорт сработал (X близко к 41 и Z близко к старту)
-        if math.abs(newPos.X - startX) < 20 and newPos.Z > startZ - 50 then
-            break
-        end
-    end
-
-    -- 5. Направляем камеру вперед в каньон
+    -- 4. Отключаем коллизию RanchGate чтобы не блокировала прыжок
     pcall(function()
-        workspace.CurrentCamera.CFrame = CFrame.lookAt(
-            Vector3.new(startX, 30, startZ + 5),
-            Vector3.new(startX, 26, startZ + 200)
-        )
+        local gate = workspace:FindFirstChild("RanchGate")
+        if gate then gate.CanCollide = false end
     end)
 
-    -- 6. Бежим вперёд и прыгаем с рампы
+    -- 5. Телепортируемся на стартовую платформу прямо перед обрывом (Z = -210, Y = 28)
+    local startX = Track.CENTRE_X or 41.38
+    local startZ = Track.Z0 or -196.37
+    hrp.CFrame = CFrame.lookAt(Vector3.new(startX, 28, -210), Vector3.new(startX, 28, -100))
+    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    task.wait(0.25)
+
+    -- 6. Бежим вперед к обрыву и совершаем прыжок в каньон
+    hum:Move(Vector3.new(0, 0, 1), false)
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-    task.wait(0.8)
+    task.wait(0.55)
 
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
     task.wait(0.12)
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-    task.wait(0.6)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
 
-    -- 7. Ожидаем начала заезда (riding = true)
+    task.wait(0.7)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+    hum:Move(Vector3.new(0, 0, 0), false)
+
+    -- 7. Ожидаем подтверждения старта заезда
     BotState.RideStatus = "Ожидание старта заезда..."
     safeSetDesc(pRideStatus, BotState.RideStatus)
 
@@ -1061,18 +1038,17 @@ startCanyonRide = function()
         end
     end
 
-    -- Если так и не запустился — выходим
     if not (NetBridge.state.ride and NetBridge.state.ride.riding) then
         BotState.IsRiding = false
-        BotState.RideStatus = "Не удалось начать заезд. Повтор через 60с."
+        BotState.RideStatus = "Не удалось начать заезд. Повтор через минуту."
         safeSetDesc(pRideStatus, BotState.RideStatus)
         return
     end
 
-    BotState.RideStatus = "Скачка в каньоне! Поиск мобов..."
+    BotState.RideStatus = "1000+ IQ Скачка в каньоне! Поиск редких драконов..."
     safeSetDesc(pRideStatus, BotState.RideStatus)
 
-    -- 8. Главный цикл приручения
+    -- 8. Главный 1000+ IQ автопилот приручения
     local lastTamedSpec = nil
 
     while isAlive() do
@@ -1088,7 +1064,7 @@ startCanyonRide = function()
         local currentZ = currentHrp.Position.Z
         local myX = currentHrp.Position.X
 
-        -- Зона и дистанция
+        -- Определение локации и дистанции
         local zoneName = "Canyon"
         pcall(function()
             local stage = Track.stageAt and Track.stageAt(currentZ)
@@ -1096,27 +1072,26 @@ startCanyonRide = function()
         end)
         local distanceM = math.max(0, math.floor(currentZ - startZ))
 
-        -- Центр трека
+        -- Динамический центр каньона
         local trackCenter = startX
         pcall(function()
             trackCenter = Track.centreX(currentZ) or startX
         end)
         local diffCenter = trackCenter - myX
 
-        -- Энергия игрока
+        -- Энергия игрока (Grip)
         local stats = NetBridge.stats()
         local playerGrip = stats and stats.grip or 0
 
-        -- Ручное управление игрока (A/D)
+        -- Свободное ручное управление игрока A/D (приоритет 100%)
         local manualSteer = 0
         if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then
-            manualSteer = -1
+            manualSteer = manualSteer - 1
         end
         if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then
-            manualSteer = 1
+            manualSteer = manualSteer + 1
         end
 
-        -- Состояние приручения
         local tameMode = TameModule.state.mode
         local tameFrac = tonumber(TameModule.state.fraction) or 0
         local currentSpec = TameModule.state.specId or "Unknown"
@@ -1124,48 +1099,49 @@ startCanyonRide = function()
         local isAirborne = (RideModule.state.phase == "airborne")
         local isTamed = (tameMode == "tamed" or tameFrac >= 1.0)
 
-        -- СОСТОЯНИЕ 1: В ПОЛЁТЕ
+        -- 1. СОСТОЯНИЕ: В ПОЛЁТЕ
         if isAirborne then
-            BotState.RideStatus = string.format("[%s • %dm] В полёте...", zoneName, distanceM)
+            BotState.RideStatus = string.format("[%s • %dm] В полёте к цели... 🚀", zoneName, distanceM)
             safeSetDesc(pRideStatus, BotState.RideStatus)
-            safeSetDesc(pTameProgress, "В полёте к цели...")
-            task.wait(0.12)
+            safeSetDesc(pTameProgress, "В полёте...")
+            task.wait(0.1)
             continue
         end
 
-        -- СОСТОЯНИЕ 2: ЗАПОЛНЕНИЕ ШКАЛЫ ПРИРУЧЕНИЯ
+        -- 2. СОСТОЯНИЕ: ПРИРУЧЕНИЕ (РОЗОВАЯ ШКАЛА ЗАПОЛНЯЕТСЯ)
         if tameMode == "filling" and tameFrac < 1.0 then
             local percent = math.floor(tameFrac * 100)
-            BotState.RideStatus = string.format("[%s • %dm] Приручение: %s 💖", zoneName, distanceM, tostring(currentSpec))
+            BotState.RideStatus = string.format("[%s • %dm] Приручение: %s 💖 (%d%%)", zoneName, distanceM, tostring(currentSpec), percent)
             safeSetDesc(pRideStatus, BotState.RideStatus)
-            safeSetDesc(pTameProgress, string.format("Розовая шкала: %d%% (%s)", percent, tostring(currentSpec)))
+            safeSetDesc(pTameProgress, string.format("Розовая шкала: %d%% [%s]", percent, tostring(currentSpec)))
 
             if manualSteer ~= 0 then
                 RideModule.state.steer = manualSteer
             else
-                RideModule.state.steer = math.clamp(diffCenter / 15, -0.6, 0.6)
+                -- Умное подруливание по центру каньона
+                RideModule.state.steer = math.clamp(diffCenter / 12, -0.7, 0.7)
             end
+
             RideModule.state.jumpWanted = false
-            task.wait(0.15)
+            task.wait(0.12)
             continue
         end
 
-        -- СОСТОЯНИЕ 3: ДИНОЗАВР ПРИРУЧЕН!
-        if isTamed and lastTamedSpec ~= currentSpec
-            and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
+        -- 3. СОСТОЯНИЕ: ДИНОЗАВР УСПЕШНО ПРИРУЧЕН (100%)
+        if isTamed and lastTamedSpec ~= currentSpec and currentSpec ~= "CarnotaurusEvolved" and currentSpec ~= "Carnotaurus" then
             local currentSize = TameModule.state.size or TameModule.state.settledSize or "Normal"
             local currentMut = TameModule.state.mutation or TameModule.state.settledMutation or "None"
             local isNew = not NetBridge.knows(currentSpec)
             lastTamedSpec = currentSpec
 
-            local notifTitle = isNew and "🎉 НОВЫЙ ВИД ОТКРЫТ!" or "Приручен! 💖"
+            local notifTitle = isNew and "🎉 ОТКРЫТ НОВЫЙ ВИД!" or "Приручен! 💖"
             if currentMut ~= "None" and currentMut ~= "" then
                 notifTitle = "🌟 [" .. currentMut .. "] " .. tostring(currentSpec) .. "!"
             elseif currentSize == "Colossal" or currentSize == "Huge" or currentSize == "Giant" then
                 notifTitle = "👑 (" .. currentSize .. ") " .. tostring(currentSpec) .. "!"
             end
 
-            safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН 100%%! 🎉 %s", tostring(currentSpec)))
+            safeSetDesc(pTameProgress, string.format("ПРИРУЧЕН НА 100%%! 🎉 (%s)", tostring(currentSpec)))
             safeNotify({
                 Title = notifTitle,
                 Content = tostring(currentSpec) ..
@@ -1178,7 +1154,7 @@ startCanyonRide = function()
             notifyWebhookTamed(currentSpec, isNew, currentSize, currentMut)
         end
 
-        -- СОСТОЯНИЕ 4: ПОИСК СЛЕДУЮЩЕЙ ЦЕЛИ
+        -- 4. 1000+ IQ ПОИСК СЛЕДУЮЩЕГО ДИНОЗАВРА / ДРАКОНА
         local bestTarget = nil
         local bestDist = 180
         local bestScore = -1
@@ -1191,16 +1167,17 @@ startCanyonRide = function()
                 if dino:IsA("Model") and dino.PrimaryPart then
                     local dPos = dino.PrimaryPart.Position
                     local dz = dPos.Z - myPos.Z
+                    local dx = dPos.X - myPos.X
 
-                    -- Только те кто ВПЕРЕДИ нас
-                    if dz > 5 and dz < 160 then
+                    -- Только мобы впереди нас в пределах зоны досягаемости
+                    if dz > 4 and dz < 160 and math.abs(dx) <= (dz * 0.9 + 25) then
                         local score, isSpecial, size, mut, reqGrip, espColor, isUnknown, specId = getDinoRarity(dino, playerGrip)
 
-                        -- Только если энергии хватает
+                        -- Фильтр энергии (Grip Gate): прыгаем только если энергии хватает
                         if reqGrip <= playerGrip then
                             local dist = (dPos - myPos).Magnitude
 
-                            -- ESP подсветка редких
+                            -- Glow ESP для редких, мутаций, гигантов и новых
                             if Config.DinoESP and isSpecial and not dino:FindFirstChild("DinoRarityGlow") then
                                 pcall(function()
                                     local hl = Instance.new("Highlight")
@@ -1214,24 +1191,16 @@ startCanyonRide = function()
                                 end)
                             end
 
-                            -- Выбор цели
+                            -- 1000+ IQ алгоритм выбора:
                             local isBetter = false
                             if not bestTarget then
                                 isBetter = true
-                            elseif Config.PrioritizeRare then
-                                -- Редкий приоритет: выбираем более редкого даже дальнего
-                                if score > bestScore * 1.15 then
-                                    isBetter = true
-                                elseif score >= bestScore * 0.85 and dist < bestDist then
-                                    isBetter = true
-                                end
-                            else
-                                -- Без приоритета редкости: HuntUnindexed и ближний
-                                if Config.HuntUnindexed and isUnknown and not (bestScore > 3000) then
-                                    isBetter = true
-                                elseif dist < bestDist then
-                                    isBetter = true
-                                end
+                            elseif score > bestScore * 1.15 then
+                                -- Заметно более редкий дракон / мутация / гигант -> отдаем приоритет даже если дальше
+                                isBetter = true
+                            elseif score >= bestScore * 0.85 and dist < bestDist then
+                                -- Схожая ценность (в пределах 15%), но этот ближе -> выбираем более близкого
+                                isBetter = true
                             end
 
                             if isBetter then
@@ -1243,7 +1212,7 @@ startCanyonRide = function()
                                 if mut ~= "None" and mut ~= "" then table.insert(tags, mut) end
                                 if size ~= "Normal" and size ~= "" then table.insert(tags, size) end
                                 if isUnknown then table.insert(tags, "NEW") end
-                                targetLabel = dino.Name .. (#tags > 0 and (" [" .. table.concat(tags, ",") .. "]") or "")
+                                targetLabel = dino.Name .. (#tags > 0 and (" [" .. table.concat(tags, ", ") .. "]") or "")
                             end
                         end
                     end
@@ -1255,23 +1224,28 @@ startCanyonRide = function()
             local targetPos = bestTarget.PrimaryPart.Position
             local diffX = targetPos.X - currentHrp.Position.X
 
+            -- Руление: ручной ввод игрока имеет наивысший приоритет
             if manualSteer ~= 0 then
                 RideModule.state.steer = manualSteer
             else
-                RideModule.state.steer = math.clamp(diffX / 12, -1, 1)
+                -- Умное подруливание к цели
+                RideModule.state.steer = math.clamp(diffX / 10, -1, 1)
             end
 
-            BotState.RideStatus = string.format("[%s • %dm] → %s (%.0fm)", zoneName, distanceM, targetLabel, bestDist)
+            BotState.RideStatus = string.format("[%s • %dm] 🎯 Цель: %s (%.0fm)", zoneName, distanceM, targetLabel, bestDist)
             safeSetDesc(pRideStatus, BotState.RideStatus)
 
-            -- Прыгаем: сразу если приручили, по дистанции или при сбросе
+            -- Прыжок:
+            -- Если текущий уже приручен на 100% -> МГНОВЕННО ПЕРЕСКАКИВАЕМ на следующего!
+            -- Если таймер сброса заканчивается (angryLeft <= 3.0) -> ЭКСТРЕННЫЙ ПРЫЖОК на любого!
+            -- Иначе прыгаем при дистанции <= 75
             local shouldJump = false
             if isTamed then
-                shouldJump = bestDist <= 85 or (bestDist <= 115 and math.abs(diffX) <= 28)
+                shouldJump = (bestDist <= 85) or (bestDist <= 120 and math.abs(diffX) <= 30)
             else
-                shouldJump = (bestDist <= 72 and math.abs(diffX) <= 20)
-                    or (angryLeft > 0 and angryLeft <= 3.5)
-                    or tameMode == "warn"
+                shouldJump = (bestDist <= 72 and math.abs(diffX) <= 22)
+                    or (angryLeft > 0 and angryLeft <= 3.0)
+                    or (tameMode == "warn")
             end
 
             if shouldJump then
@@ -1286,23 +1260,24 @@ startCanyonRide = function()
                 task.wait(0.1)
             end
         else
-            -- Нет целей — держим центр
+            -- Целей впереди пока нет: держим динамический центр
             if manualSteer ~= 0 then
                 RideModule.state.steer = manualSteer
             else
-                RideModule.state.steer = math.clamp(diffCenter / 15, -0.6, 0.6)
+                RideModule.state.steer = math.clamp(diffCenter / 12, -0.7, 0.7)
             end
+
             local baseDesc = isTamed
-                and "Приручен! Скачем вперёд..."
-                or string.format("Едем: %s (%.0fs до сброса)", tostring(currentSpec), angryLeft)
+                and "Приручен! Скачем вперед в следующую локацию..."
+                or string.format("Скачка на %s (%.0fs до сброса)", tostring(currentSpec), angryLeft)
             BotState.RideStatus = string.format("[%s • %dm] %s", zoneName, distanceM, baseDesc)
             safeSetDesc(pRideStatus, BotState.RideStatus)
-            task.wait(0.15)
+            task.wait(0.12)
         end
     end
 
     -- Завершение заезда
-    BotState.RideStatus = "Возврат в хаб..."
+    BotState.RideStatus = "Возврат в хаб и сбор наград..."
     safeSetDesc(pRideStatus, BotState.RideStatus)
     pcall(function() NetBridge.rideEnd("done") end)
     task.wait(1.5)
@@ -1319,7 +1294,7 @@ startCanyonRide = function()
 
     safeNotify({
         Title = "Скачки 🦕",
-        Content = "Заезд завершён! Вернулись в хаб.",
+        Content = "Заезд завершен! Награды собраны, вернулись на тренажер.",
         Duration = 3,
         Icon = "check"
     })
