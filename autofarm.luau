@@ -754,6 +754,7 @@ Window = WindUI:CreateWindow({
     Theme = "Rose",
     Transparent = true,
     Resizable = true,
+    ToggleKey = Config.ToggleKeyCode,
 })
 
 -- Устанавливаем клавишу скрытия/открытия меню
@@ -1389,21 +1390,6 @@ local function updateStatsUI()
     end)
 end
 
--- Обработчик клавиши открытия меню (фоллбэк)
-local toggleConn = UserInputService.InputBegan:Connect(function(input, gpe)
-    if not gpe and input.KeyCode == Config.ToggleKeyCode then
-        pcall(function()
-            if Window and Window.Toggle then
-                Window:Toggle()
-                return
-            end
-            local frame = getWindowFrame()
-            if frame then
-                frame.Visible = not frame.Visible
-            end
-        end)
-    end
-end)
 
 -- Защита Anti-AFK
 local afkConn = LocalPlayer.Idled:Connect(function()
@@ -1427,7 +1413,6 @@ if typeof(STATE) == "table" and STATE.onCleanup then
     STATE.onCleanup(function()
         BotState.Running = false
         applyChillVisuals(false)
-        if toggleConn then toggleConn:Disconnect() end
         if afkConn then afkConn:Disconnect() end
         if charAddedConn then charAddedConn:Disconnect() end
         if Window and Window.Destroy then Window:Destroy() end
